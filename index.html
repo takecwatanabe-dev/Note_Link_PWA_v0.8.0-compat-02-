@@ -5,28 +5,26 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>NOTE LINK — v0.8.0 / B-REL6-HF1</title>
 <style>
-  /* ====== 外観はB6を壊さない：追加はダイアログ内と内部レイヤのみ ====== */
   :root{
-    --a4-w-mm:210;
-    --a4-h-mm:297;
-    --approx-dpi:96; /* 目安。印刷は@media printで実寸化 */
+    --a4w: 794px;  /* 210mm ≒ 794px @96dpi */
+    --a4h:1123px;  /* 297mm ≒1123px @96dpi */
   }
-  body{margin:0;background:#1a1a1a;color:#f4f4f4;font-family:system-ui, -apple-system, "Noto Sans JP", sans-serif;}
-  .topbar{height:44px;display:flex;align-items:center;gap:12px;padding:0 14px;background:#111;border-bottom:1px solid #2a2a2a;}
+  html,body{height:100%}
+  body{margin:0;background:#1b1b1b;color:#f4f4f4;font-family:system-ui,"Noto Sans JP",sans-serif}
+  .topbar{height:44px;display:flex;align-items:center;gap:12px;padding:0 14px;background:#111;border-bottom:1px solid #2a2a2a}
   .ver{font-weight:700;letter-spacing:.02em}
-  .wrap{display:flex;gap:0}
-  /* 既存レイアウトは変更しない想定。ここでは最小のプレースホルダのみ */
-  .canvas-wrap{position:relative;flex:1;display:flex;justify-content:center;align-items:flex-start;padding:12px 0;overflow:auto;height:calc(100vh - 44px);}
+  .kbd{font-size:.82rem;color:#9aa}
+  .wrap{display:flex}
+  .canvas-wrap{position:relative;flex:1;display:flex;justify-content:center;align-items:flex-start;padding:12px 0;overflow:auto;height:calc(100vh - 44px)}
   .a4-stage{
     position:relative;background:#fff;border:1px solid #ddd;box-shadow:0 2px 12px rgba(0,0,0,.35);
-    /* 画面上はおおよそのA4比率。実寸は@media printで担保 */
-    width: calc(var(--a4-w-mm) * 3.78px); /* 210mm ≒ 793.8px */
-    height: calc(var(--a4-h-mm) * 3.78px); /* 297mm ≒ 1122.7px */
+    width:var(--a4w);height:var(--a4h);
   }
-  canvas#note{position:absolute;left:0;top:0;width:100%;height:100%;}
-  canvas#overlay{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;}
+  canvas{image-rendering:crisp-edges;touch-action:none;-ms-touch-action:none;user-select:none}
+  #note{position:absolute;left:0;top:0;width:100%;height:100%}
+  #overlay{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
 
-  /* ====== 消しゴム設定ダイアログ（内部UIのみ追加） ====== */
+  /* —— 消しゴム設定ダイアログ（内部UIのみ追加） —— */
   dialog#eraserDialog{
     border:none;border-radius:12px;padding:0;max-width:360px;background:#121212;color:#eee;
     box-shadow:0 14px 60px rgba(0,0,0,.6);width:min(92vw,360px)
@@ -36,9 +34,7 @@
   .row{display:flex;align-items:center;justify-content:space-between;gap:10px}
   .row .label{font-size:.95rem;color:#ccc}
   .seg{display:inline-flex;border:1px solid #3a3a3a;border-radius:10px;overflow:hidden}
-  .seg button{
-    background:#1b1b1b;color:#eee;border:none;padding:8px 10px;cursor:pointer
-  }
+  .seg button{background:#1b1b1b;color:#eee;border:none;padding:8px 10px;cursor:pointer}
   .seg button[aria-pressed="true"]{background:#2d2d2d;font-weight:700}
   .stepper{display:inline-flex;align-items:center;gap:6px}
   .stepper button{width:34px;height:34px;border-radius:8px;border:1px solid #3a3a3a;background:#1b1b1b;color:#eee;cursor:pointer}
@@ -46,22 +42,19 @@
   .mmnote{font-size:.82rem;color:#9aa}
   .dlg-ft{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid #2b2b2b}
   .dlg-ft button{border:1px solid #3a3a3a;background:#1b1b1b;color:#eee;border-radius:10px;padding:8px 12px;cursor:pointer}
-  .kbd{font-size:.82rem;color:#9aa}
+
   @media print{
     body{background:#fff;color:#000}
     .topbar{display:none}
     .canvas-wrap{padding:0;height:auto}
-    .a4-stage{
-      width:210mm;height:297mm;border:none;box-shadow:none;margin:0 auto;
-    }
+    .a4-stage{width:210mm;height:297mm;border:none;box-shadow:none;margin:0 auto}
   }
 </style>
 </head>
 <body>
-  <!-- 既存UIは壊さない方針：バージョン表示のみ（B6にもともとあれば差異なし） -->
   <div class="topbar">
     <div class="ver">NOTE LINK — v0.8.0 / <strong>B-REL6-HF1</strong></div>
-    <div class="kbd">（補助）消しゴム設定: Ctrl+E / 形状切替: R / サイズ: [ / ]</div>
+    <div class="kbd">（補助）消しゴム設定: Ctrl+E ／ 形状切替: R ／ サイズ: [ / ]</div>
   </div>
 
   <div class="wrap">
@@ -73,7 +66,7 @@
     </main>
   </div>
 
-  <!-- 既存の「消しゴム設定ダイアログ」がある前提。無い環境向けに最小限を添える -->
+  <!-- 既存UIは変えず、設定はダイアログ内部のみ追加 -->
   <dialog id="eraserDialog">
     <div class="dlg-hd">消しゴム 設定</div>
     <div class="dlg-bd">
@@ -84,7 +77,6 @@
           <button id="shapeSquare" aria-pressed="false">四角</button>
         </div>
       </div>
-
       <div class="row">
         <div class="label">サイズ</div>
         <div class="stepper">
@@ -93,17 +85,15 @@
           <button id="sizeInc" aria-label="サイズ拡大">+</button>
         </div>
       </div>
-
       <div class="row">
         <div class="label">ガイド表示</div>
-        <div class="seg" role="group" aria-label="Guide Toggle">
-          <button id="guideOn" aria-pressed="true">ON</button>
+        <div class="seg">
+          <button id="guideOn"  aria-pressed="true">ON</button>
           <button id="guideOff" aria-pressed="false">OFF</button>
         </div>
       </div>
-
       <div class="mmnote" id="sizeInfo">現在：24 px（約 6.35 mm）</div>
-      <div class="mmnote">ショートカット：形状切替 <b>R</b> ／ サイズ <b>[</b> <b>]</b></div>
+      <div class="mmnote">ショートカット：形状 <b>R</b> ／ サイズ <b>[</b> <b>]</b> ／ ダイアログ <b>Ctrl+E</b></div>
     </div>
     <div class="dlg-ft">
       <button id="dlgClose">閉じる</button>
@@ -112,9 +102,7 @@
 
 <script>
 (() => {
-  /* =========================
-     設定（B6既定を踏襲／変更は内部のみ）
-  ========================== */
+  // ===== 既定（UIは触らず内部のみ） =====
   const DEFAULTS = {
     penColor: '#000000',
     markerColor: '#FFFF00',
@@ -124,263 +112,194 @@
     eraser: { shape: 'circle', size: 24, guide: true }
   };
 
-  /* 既存UIには触れず、内部で状態管理 */
+  const stage = document.getElementById('stage');
+  const note  = document.getElementById('note');
+  const ov    = document.getElementById('overlay');
+  const dpr   = Math.max(1, window.devicePixelRatio || 1);
+
   const state = {
-    tool: 'pen', // 'pen' | 'marker' | 'eraser'
-    drawing: false,
-    startX: 0, startY: 0,
-    lastX: 0, lastY: 0,
-    straight: false
+    tool: 'pen', // 'pen'|'marker'|'eraser'
+    drawing:false,
+    startX:0, startY:0,
+    lastX:0, lastY:0,
+    straight:false
   };
 
-  const stage = document.getElementById('stage');
-  const note = document.getElementById('note');
-  const ov = document.getElementById('overlay');
-  const dpr = Math.max(1, window.devicePixelRatio || 1);
-
-  // A4相当 px（画面用）。印刷はCSSで実寸化。
-  const A4W = Math.round(210 * 96 / 25.4); // ≒ 794
-  const A4H = Math.round(297 * 96 / 25.4); // ≒ 1123
-
-  function resizeCanvas() {
-    const rect = stage.getBoundingClientRect();
-    // 画面ではCSSサイズ＝見た目。内部解像度はdprで拡張。
-    note.width = Math.floor(rect.width * dpr);
-    note.height = Math.floor(rect.height * dpr);
-    ov.width = note.width;
-    ov.height = note.height;
-  }
-  resizeCanvas();
-  addEventListener('resize', resizeCanvas);
-
-  const ctx = note.getContext('2d');
-  const octx = ov.getContext('2d');
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-
-  // ====== デフォルト色・透明度 ======
-  let penColor = DEFAULTS.penColor;
+  // —— 色・太さ
+  let penColor    = DEFAULTS.penColor;
   let markerColor = DEFAULTS.markerColor;
   let markerAlpha = DEFAULTS.markerAlpha;
-  let penWidth = DEFAULTS.penWidth;
+  let penWidth    = DEFAULTS.penWidth;
   let markerWidth = DEFAULTS.markerWidth;
 
-  // ====== 消しゴム設定（ダイアログ内部のみUI追加） ======
-  const eraser = { ...DEFAULTS.eraser }; // {shape,size,guide}
+  // —— 消しゴム
+  const eraser = { ...DEFAULTS.eraser };
 
-  // mm換算（目安） px→mm
-  const pxToMm = (px) => (px * 25.4 / 96);
+  // —— 2Dコンテキスト
+  const ctx  = note.getContext('2d');
+  const octx = ov.getContext('2d');
 
-  // ====== ポインタ座標補正（スクロール/ズーム対応） ======
-  function getPos(evt){
+  // —— 実サイズ確定（初回はlayout完了後に1フレーム遅延）
+  function resizeCanvas() {
+    const r = stage.getBoundingClientRect();
+    const w = Math.max(2, Math.floor(r.width  * dpr));
+    const h = Math.max(2, Math.floor(r.height * dpr));
+    note.width = w; note.height = h;
+    ov.width   = w; ov.height   = h;
+    // CSSサイズ（見た目）はstageと同じに保つ
+    note.style.width = r.width + 'px';
+    note.style.height= r.height + 'px';
+    ov  .style.width = r.width + 'px';
+    ov  .style.height= r.height + 'px';
+    // 描画スタイル（毎回統一）
+    ctx.lineCap = ctx.lineJoin = 'round';
+  }
+  requestAnimationFrame(()=>{ resizeCanvas(); });
+  addEventListener('resize', ()=>{ requestAnimationFrame(resizeCanvas); });
+
+  // —— 座標変換（CSS→キャンバス）
+  function pos(e){
     const r = note.getBoundingClientRect();
-    // CSSピクセル→キャンバス座標(dpr)
-    const x = (evt.clientX - r.left) * dpr;
-    const y = (evt.clientY - r.top) * dpr;
-    return {x, y};
+    return {
+      x: (e.clientX - r.left) * dpr,
+      y: (e.clientY - r.top)  * dpr
+    };
   }
 
-  // ====== ガイド描画（プレビューのみ） ======
-  function drawGuide(x, y){
-    octx.clearRect(0,0,ov.width,ov.height);
-    if(state.tool !== 'eraser' || !eraser.guide) return;
-    octx.save();
-    octx.scale(1,1);
-    octx.lineWidth = 2 * dpr;
-    octx.strokeStyle = 'rgba(0,0,0,0.35)';
-    octx.setLineDash([6 * dpr, 6 * dpr]);
-    const s = eraser.size * dpr;
-    if(eraser.shape === 'circle'){
-      octx.beginPath();
-      octx.arc(x, y, s/2, 0, Math.PI*2);
-      octx.stroke();
+  function pxToMm(px){ return px * 25.4 / 96; }
+
+  function style(tool){
+    if(tool==='pen'){
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1.0;
+      ctx.strokeStyle = penColor;
+      ctx.lineWidth   = penWidth * dpr;
+    }else if(tool==='marker'){
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = markerAlpha;            // ★直線/曲線 共通
+      ctx.strokeStyle = markerColor;
+      ctx.lineWidth   = markerWidth * dpr;
     }else{
-      octx.strokeRect(x - s/2, y - s/2, s, s);
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.globalAlpha = 1.0;
+      ctx.lineWidth   = eraser.size * dpr;
+    }
+    ctx.lineCap = ctx.lineJoin = 'round';
+  }
+
+  function begin(x,y){
+    state.drawing = true;
+    state.startX = state.lastX = x;
+    state.startY = state.lastY = y;
+    ctx.beginPath(); ctx.moveTo(x,y);
+  }
+  function drag(x,y,straight){
+    ctx.beginPath();
+    if(straight){ ctx.moveTo(state.startX, state.startY); }
+    else        { ctx.moveTo(state.lastX, state.lastY); }
+    ctx.lineTo(x,y);
+    ctx.stroke();
+    state.lastX = x; state.lastY = y;
+  }
+  function end(){ state.drawing = false; }
+
+  // —— ガイド
+  function guide(x,y){
+    octx.clearRect(0,0,ov.width,ov.height);
+    if(state.tool!=='eraser' || !eraser.guide) return;
+    const s = eraser.size * dpr;
+    octx.save();
+    octx.strokeStyle = 'rgba(0,0,0,.35)';
+    octx.lineWidth = 2 * dpr;
+    octx.setLineDash([6*dpr,6*dpr]);
+    if(eraser.shape==='circle'){
+      octx.beginPath(); octx.arc(x,y,s/2,0,Math.PI*2); octx.stroke();
+    }else{
+      octx.strokeRect(x-s/2,y-s/2,s,s);
     }
     octx.restore();
   }
 
-  // ====== 描画ユーティリティ（透明度を常に統一適用） ======
-  function applyStyle(tool){
-    if(tool === 'pen'){
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = 1.0;
-      ctx.strokeStyle = penColor;
-      ctx.lineWidth = penWidth * dpr;
-    }else if(tool === 'marker'){
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = markerAlpha; // ★ 直線／曲線 共通適用
-      ctx.strokeStyle = markerColor;
-      ctx.lineWidth = markerWidth * dpr;
-    }else if(tool === 'eraser'){
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.globalAlpha = 1.0;
-      ctx.lineWidth = eraser.size * dpr;
-    }
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-  }
-
-  function beginStroke(x, y){
-    state.drawing = true;
-    state.startX = state.lastX = x;
-    state.startY = state.lastY = y;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-  }
-  function moveStroke(x, y, straight=false){
-    ctx.beginPath();
-    if(straight){
-      ctx.moveTo(state.startX, state.startY);
-      ctx.lineTo(x, y);
-    }else{
-      ctx.moveTo(state.lastX, state.lastY);
-      ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-    state.lastX = x; state.lastY = y;
-  }
-  function endStroke(){
-    state.drawing = false;
-  }
-
-  // ====== 入力イベント ======
-  function pointerDown(e){
-    const {x,y} = getPos(e);
-    if(state.tool === 'eraser'){
-      // destination-out で形状に応じて塗りつぶし
-      applyStyle('eraser');
-      ctx.beginPath();
+  // —— ポインタ
+  note.addEventListener('pointerdown', (e)=>{
+    note.setPointerCapture?.(e.pointerId);
+    const {x,y} = pos(e);
+    if(state.tool==='eraser'){
+      style('eraser');
       const s = eraser.size * dpr;
-      if(eraser.shape === 'circle'){
-        ctx.arc(x, y, s/2, 0, Math.PI*2);
-        ctx.fill();
-      }else{
-        ctx.fillRect(x - s/2, y - s/2, s, s);
-      }
-      drawGuide(x,y);
+      if(eraser.shape==='circle'){ ctx.beginPath(); ctx.arc(x,y,s/2,0,Math.PI*2); ctx.fill(); }
+      else{ ctx.fillRect(x-s/2,y-s/2,s,s); }
+      guide(x,y);
       return;
     }
-    applyStyle(state.tool);
-    beginStroke(x,y);
-    drawGuide(x,y);
-  }
-  function pointerMove(e){
-    const {x,y} = getPos(e);
-    if(state.tool === 'eraser'){
-      drawGuide(x,y);
+    style(state.tool); begin(x,y); guide(x,y);
+  });
+
+  note.addEventListener('pointermove', (e)=>{
+    const {x,y} = pos(e);
+    if(state.tool==='eraser'){
+      guide(x,y);
       if(e.buttons & 1){
-        applyStyle('eraser');
+        style('eraser');
         const s = eraser.size * dpr;
-        if(eraser.shape === 'circle'){
-          ctx.beginPath(); ctx.arc(x, y, s/2, 0, Math.PI*2); ctx.fill();
-        }else{
-          ctx.fillRect(x - s/2, y - s/2, s, s);
-        }
+        if(eraser.shape==='circle'){ ctx.beginPath(); ctx.arc(x,y,s/2,0,Math.PI*2); ctx.fill(); }
+        else{ ctx.fillRect(x-s/2,y-s/2,s,s); }
       }
       return;
     }
-    if(!state.drawing) { drawGuide(x,y); return; }
-    // Shiftキーで直線
-    const straight = e.shiftKey || state.straight;
-    applyStyle(state.tool);
-    moveStroke(x,y,straight);
-    drawGuide(x,y);
-  }
-  function pointerUp(){
-    if(state.drawing) endStroke();
+    if(!state.drawing){ guide(x,y); return; }
+    style(state.tool); drag(x,y, e.shiftKey || state.straight); guide(x,y);
+  });
+
+  const endAll = ()=>{
+    if(state.drawing) end();
     octx.clearRect(0,0,ov.width,ov.height);
-  }
+    try{ note.releasePointerCapture?.(PointerEvent?.pointerId); }catch(_){}
+  };
+  note.addEventListener('pointerup', endAll);
+  note.addEventListener('pointercancel', endAll);
+  note.addEventListener('pointerleave', endAll);
 
-  note.addEventListener('pointerdown', pointerDown);
-  note.addEventListener('pointermove', pointerMove);
-  addEventListener('pointerup', pointerUp);
-  addEventListener('pointercancel', pointerUp);
-  addEventListener('pointerleave', pointerUp);
-
-  // ====== 選択（UIは既存のまま想定。ここでは補助ホットキーのみ） ======
+  // —— ホットキー（既存UIは触らず補助のみ）
   addEventListener('keydown', (e)=>{
-    // Ctrl+E: 設定ダイアログ（補助）
-    if(e.ctrlKey && e.key.toLowerCase()==='e'){
-      e.preventDefault();
-      openEraserDialog();
-    }
-    // ツール切替（補助）
+    if(e.ctrlKey && e.key.toLowerCase()==='e'){ e.preventDefault(); openDlg(); }
     if(e.key==='1') state.tool='pen';
     if(e.key==='2') state.tool='marker';
     if(e.key==='3') state.tool='eraser';
-    // 直線補助（押している間）
     if(e.key==='Shift') state.straight = true;
-    // 形状切替（補助）
-    if(e.key.toLowerCase()==='r'){
-      eraser.shape = (eraser.shape==='circle'?'square':'circle');
-      syncEraserUI();
-      drawGuide(state.lastX, state.lastY);
-    }
-    // サイズ微調整
-    if(e.key==='['){ eraser.size = Math.max(4, eraser.size-5); syncEraserUI(); }
-    if(e.key===']'){ eraser.size = Math.min(200, eraser.size+5); syncEraserUI(); }
+    if(e.key.toLowerCase()==='r'){ eraser.shape = eraser.shape==='circle'?'square':'circle'; syncDlg(); }
+    if(e.key==='['){ eraser.size=Math.max(4,eraser.size-5); syncDlg(); }
+    if(e.key===']'){ eraser.size=Math.min(200,eraser.size+5); syncDlg(); }
   });
-  addEventListener('keyup', (e)=>{ if(e.key==='Shift') state.straight = false; });
+  addEventListener('keyup', (e)=>{ if(e.key==='Shift') state.straight=false; });
 
-  // ====== マーカー/ペンのデフォルト適用（既定通り） ======
-  function selectPen(){ state.tool='pen'; }
-  function selectMarker(){ state.tool='marker'; }
-  function selectEraser(){ state.tool='eraser'; }
-
-  // 初期ツール・色
-  selectPen();
-
-  // ====== ダイアログUI（内部のみ追加） ======
+  // —— ダイアログ制御（内部のみ追加）
   const dlg = document.getElementById('eraserDialog');
-  const $ = (id)=>document.getElementById(id);
-  function openEraserDialog(){
-    syncEraserUI();
-    if(typeof dlg.showModal === 'function') dlg.showModal();
-  }
-  function closeEraserDialog(){
-    if(typeof dlg.close === 'function') dlg.close();
-  }
-
-  function syncEraserUI(){
-    // 形状
+  const $ = id => document.getElementById(id);
+  function openDlg(){ syncDlg(); dlg.showModal?.(); }
+  function closeDlg(){ dlg.close?.(); }
+  function syncDlg(){
     $('shapeCircle').setAttribute('aria-pressed', eraser.shape==='circle');
     $('shapeSquare').setAttribute('aria-pressed', eraser.shape==='square');
-    // サイズ
     $('sizeRange').value = eraser.size;
-    $('sizeInfo').textContent = `現在：${eraser.size} px（約 ${ (pxToMm(eraser.size)).toFixed(2) } mm）`;
-    // ガイド
+    $('sizeInfo').textContent = `現在：${eraser.size} px（約 ${(pxToMm(eraser.size)).toFixed(2)} mm）`;
     $('guideOn').setAttribute('aria-pressed', eraser.guide===true);
     $('guideOff').setAttribute('aria-pressed', eraser.guide===false);
   }
+  $('shapeCircle').addEventListener('click', ()=>{ eraser.shape='circle'; syncDlg(); });
+  $('shapeSquare').addEventListener('click', ()=>{ eraser.shape='square'; syncDlg(); });
+  $('sizeDec').addEventListener('click', ()=>{ eraser.size=Math.max(4,eraser.size-5); syncDlg(); });
+  $('sizeInc').addEventListener('click', ()=>{ eraser.size=Math.min(200,eraser.size+5); syncDlg(); });
+  $('sizeRange').addEventListener('input',(e)=>{ eraser.size=+e.target.value; syncDlg(); });
+  $('guideOn').addEventListener('click',()=>{ eraser.guide=true; syncDlg(); });
+  $('guideOff').addEventListener('click',()=>{ eraser.guide=false; syncDlg(); });
+  $('dlgClose').addEventListener('click', closeDlg);
 
-  // イベント（ダイアログ内部のみ）
-  $('shapeCircle').addEventListener('click', ()=>{ eraser.shape='circle'; syncEraserUI(); });
-  $('shapeSquare').addEventListener('click', ()=>{ eraser.shape='square'; syncEraserUI(); });
-  $('sizeDec').addEventListener('click', ()=>{ eraser.size=Math.max(4, eraser.size-5); syncEraserUI(); });
-  $('sizeInc').addEventListener('click', ()=>{ eraser.size=Math.min(200, eraser.size+5); syncEraserUI(); });
-  $('sizeRange').addEventListener('input', (e)=>{ eraser.size=Number(e.target.value); syncEraserUI(); });
-  $('guideOn').addEventListener('click', ()=>{ eraser.guide=true; syncEraserUI(); });
-  $('guideOff').addEventListener('click', ()=>{ eraser.guide=false; syncEraserUI(); });
-  $('dlgClose').addEventListener('click', closeEraserDialog);
+  // —— 初期ツール（既定）
+  state.tool = 'pen'; // デフォ：ペン＝黒
+  // マーカーは黄50%（直線/曲線で統一α）
 
-  // ====== マーカー透明度統一の確認用：直線ドラッグ時も同じalpha ======
-  // 既存UIに合わせ、Shiftで直線・通常はフリーハンドに統一済み
-
-  // ====== 参考：マーカー/ペン切替API（既存UIから呼べるようwindowに露出） ======
-  window.NoteLinkHF1 = {
-    setToolPen: selectPen,
-    setToolMarker: selectMarker,
-    setToolEraser: selectEraser,
-    openEraserDialog,
-    setMarkerAlpha: (a)=>{ markerAlpha = Math.max(0, Math.min(1, a)); },
-    setMarkerColor: (c)=>{ markerColor = c; },
-    setPenColor:    (c)=>{ penColor = c; },
-    setPenWidth:    (w)=>{ penWidth = Math.max(1, w|0); },
-    setMarkerWidth: (w)=>{ markerWidth = Math.max(1, w|0); },
-  };
-
-  // ====== 初回ガイド（ツールは既定でペン、マーカーは黄50%） ======
+  // —— 最初のガイド消去
   octx.clearRect(0,0,ov.width,ov.height);
 })();
 </script>
