@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Note Link — v0.8.0-compat-02b-rel-b4</title>
+<title>Note Link — v0.8.0-compat-02b-rel-b5</title>
 <style>
 :root{--ink:#e6f1ff;--ink-dim:#9bd6e9;--bg:#0b1020;--panel:#101827;--accent:#3f78ff;--ok:#20e3c2;--muted:#2a3550;--shadow:0 10px 24px rgba(0,0,0,.45);--topbar-h:44px;--toolbar-w:56px}
 *{box-sizing:border-box}
@@ -64,7 +64,7 @@ header.topbar{position:fixed;top:0;left:0;right:0;z-index:2000;height:var(--topb
 </head>
 <body>
 <header class="topbar" id="topbar">
-  <strong id="verText">Note Link v0.8.0 / B-REL4</strong>
+  <strong id="verText">Note Link v0.8.0 / B-REL5</strong>
   <span class="sp"></span>
   <button class="btn" id="btnZoomOut">−</button>
   <button class="btn" id="btnZoomReset">100%</button>
@@ -74,7 +74,7 @@ header.topbar{position:fixed;top:0;left:0;right:0;z-index:2000;height:var(--topb
   <button class="btn" id="btnPrint">印刷</button>
   <button class="btn" id="btnPng">PNG</button>
   <button class="btn" id="btnShare">共有</button>
-  <span class="build" id="buildText">build: compat-02b-rel-b4</span>
+  <span class="build" id="buildText">build: compat-02b-rel-b5</span>
 </header>
 
 <aside class="sidebar" id="sidebar">
@@ -148,7 +148,7 @@ header.topbar{position:fixed;top:0;left:0;right:0;z-index:2000;height:var(--topb
   </div>
 </div></div>
 
-<!-- 診断ログ（?debug=1 の時だけ出す） -->
+<!-- 診断ログ（?debug=1 の時だけ） -->
 <div id="diag"><div class="card"><div class="hd"><strong>診断ログ</strong><span id="env"></span></div>
 <textarea id="log" spellcheck="false"></textarea>
 <div class="row"><button id="btnCopy">ログをコピー</button><button id="btnClear">クリア</button></div></div></div>
@@ -174,10 +174,10 @@ const cv=$('#paint'), ctx=cv.getContext('2d',{alpha:true});
 const viewport=$('#viewport'), textLayer=$('#textLayer');
 
 /* ==== version ==== */
-const APP_VERSION='v0.8.0', BUILD_ID='compat-02b-rel-b4';
+const APP_VERSION='v0.8.0', BUILD_ID='compat-02b-rel-b5';
 document.title=`Note Link — ${APP_VERSION}-${BUILD_ID}`;
 $('#buildText').textContent=`build: ${BUILD_ID}`;
-$('#verText').textContent='Note Link v0.8.0 / B-REL4';
+$('#verText').textContent='Note Link v0.8.0 / B-REL5';
 
 /* ==== layout ==== */
 function applyBars(){ const h=Math.round(topbar.getBoundingClientRect().height)||44; document.documentElement.style.setProperty('--topbar-h',h+'px');}
@@ -212,7 +212,6 @@ function setActiveTool(t){
   $('#rowSize').style.display=(t==='pen'||t==='marker'||t==='eraser')?'':'none';
   $('#rowPenExt').style.display=(t==='pen'||t==='marker')?'':'none';
   syncUI();
-  /* Handカーソル（見た目のみ） */
   cv.style.cursor = (t === 'hand') ? 'grab' : 'crosshair';
 }
 $('#btnSidebarToggle').addEventListener('click',e=>{ e.stopPropagation(); sidebar.classList.toggle('collapsed');});
@@ -257,8 +256,7 @@ function setZoom(z){
   zoom = Math.max(0.5, Math.min(3, z));
   $('#btnZoomReset').textContent = Math.round(zoom*100) + '%';
   updateViewportTransform();
-  /* キャンバス再構築は行わない：既存描画を維持。必要な表示はグリッドのみ更新 */
-  drawGrid();
+  drawGrid(); // 既存描画は維持
 }
 $('#btnZoomIn').addEventListener('click',()=>setZoom(zoom+0.1));
 $('#btnZoomOut').addEventListener('click',()=>setZoom(zoom-0.1));
@@ -278,101 +276,84 @@ function drawGrid(){
 
 /* ==== drawing core ==== */
 function setCtx(){
-  ctx.lineCap=(tool==='marker'||tool==='pen')?cap:'round';
   ctx.lineJoin='round';
+  ctx.lineCap=(tool==='marker'||tool==='pen')?cap:'round';
   if(tool==='marker'){ ctx.globalCompositeOperation='source-over'; ctx.strokeStyle=hexA(color,alpha); }
   else if(tool==='pen'){ ctx.globalCompositeOperation='source-over'; ctx.strokeStyle=color; }
   else if(tool==='eraser'){ ctx.globalCompositeOperation='destination-out'; ctx.strokeStyle='#000'; }
   ctx.lineWidth=(size||4)*DPR;
 }
 function hexA(hex,a){const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)||['','cc','e5','8a'];const r=parseInt(m[1],16),g=parseInt(m[2],16),b=parseInt(m[3],16);return `rgba(${r},${g},${b},${a??1})`;}
-function pt(e){const r=cv.getBoundingClientRect();return {x:(e.clientX-r.left)/zoom*DPR,y:(e.clientY-r.top)/zoom*DPR}}
+
+/* ★ 座標取得を“実寸変換”に統一（ズレ防止） */
+function pt(e){
+  const r=cv.getBoundingClientRect();
+  const x=(e.clientX - r.left) * (cv.width  / r.width);
+  const y=(e.clientY - r.top ) * (cv.height / r.height);
+  return {x,y};
+}
+
 function snapToGrid(p){if(!gridOn)return p;const g=mmToPx(gridStepMM);return {x:Math.round(p.x/g)*g,y:Math.round(p.y/g)*g}}
 function snapLine(p0,p1){if(gridFirst){const a0=snapToGrid(p0),a1=snapToGrid(p1);return {x:a1.x,y:a1.y,ang:Math.atan2(a1.y-a0.y,a1.x-a0.x)}} const dx=p1.x-p0.x,dy=p1.y-p0.y,step=Math.PI/12;let ang=Math.round(Math.atan2(dy,dx)/step)*step;let len=Math.hypot(dx,dy),x=p0.x+Math.cos(ang)*len,y=p0.y+Math.sin(ang)*len;if(gridOn){({x,y}=snapToGrid({x,y}))}return {x,y,ang}}
 
-/* stylus vs palm */
-function isStylusLike(e){
-  if(e.pointerType==='pen') return true;
-  const narrow=(e.width||30)<=24 && (e.height||30)<=24;
-  const hasHints=(typeof e.tiltX==='number') || (typeof e.twist==='number') || (typeof e.tangentialPressure==='number');
-  const p=(typeof e.pressure==='number') ? e.pressure : 0.2;
-  return e.pointerType==='touch' && (hasHints || (narrow && p>=0.1));
-}
-function isPalmTouch(e){
-  if(isStylusLike(e)) return false;
-  if(!palmReject) return false;
-  const now=performance.now();
-  if(e.pointerType==='touch' && penRecent.active && (now-penRecent.ts)<1200) return true;
-  const area=(e.width||0)*(e.height||0);
-  return e.pointerType==='touch' && area>1200;
-}
-function dynamicWidthFromPen(e,base){let w=base;if(pressureOn&&typeof e.pressure==='number'){const p=Math.max(0.05,Math.min(1,e.pressure||0.5));w=base*(0.4+0.9*p)}if(tiltOn){const t=Math.hypot(e.tiltX||0,e.tiltY||0)/90;const k=(tool==='marker'?0.9:0.4);w*=(1+k*Math.min(1,t))}return w}
-function updatePenRecent(e){if(e.pointerType==='pen'||isStylusLike(e)){penRecent.active=true;penRecent.ts=performance.now()}}
-
-/* === drawing handlers（B-REL4：濃さ差解消＆滑らか化） === */
-let drawing=false, startPt=null, lastPt=null, panning=false;
-
-function drawSegment(prev, cur){
-  ctx.beginPath();
-  const mx=(prev.x+cur.x)/2, my=(prev.y+cur.y)/2;
-  ctx.moveTo(prev.x, prev.y);
-  ctx.quadraticCurveTo(prev.x, prev.y, mx, my);
-  ctx.stroke();
-}
-function drawFreehandFrom(e){
-  const list=(e.getCoalescedEvents && e.getCoalescedEvents()) || [e];
-  for(const ev of list){
-    const p=pt(ev);
-    if(!lastPt){ lastPt=p; continue; }
-    drawSegment(lastPt, p);
-    lastPt=p;
-  }
-}
+/* === drawing handlers（B-REL5：連続ストローク方式） === */
+let drawing=false, startPt=null, panning=false;
 
 function onDown(e){
-  updatePenRecent(e);
-  if(isPalmTouch(e)) return;
+  if(DBG) logln(`evt: pd type=${e.pointerType} pres=${e.pressure??'?'} w=${e.width||0} h=${e.height||0}`);
+  if(palmReject){
+    const area=(e.width||0)*(e.height||0);
+    if(e.pointerType==='touch' && area>1200) return; // 簡易パーム
+  }
   if(tool==='hand'){
     panning=true; try{cv.setPointerCapture(e.pointerId)}catch{};
     cv.style.cursor='grabbing';
     return;
   }
   e.preventDefault(); try{cv.setPointerCapture(e.pointerId)}catch{};
-  setCtx(); ctx.lineWidth=dynamicWidthFromPen(e,(size||4))*DPR;
+  setCtx();
+  ctx.lineWidth = (tool==='pen'||tool==='marker') ? ( (typeof e.pressure==='number'&&pressureOn) ? (size*(0.4+0.9*Math.max(0.05,Math.min(1,e.pressure||0.5))))*DPR : (size*DPR) ) : (size*DPR);
+
   const p=pt(e);
   const straight=(straightKey || $('#uiStraight').checked);
   startPt=(gridFirst && straight)?snapToGrid(p):p;
-  drawing=true; lastPt=startPt;
-  if(DBG) logln(`evt: pd type=${e.pointerType} pres=${e.pressure??'?'} w=${e.width||0} h=${e.height||0}`);
+  drawing=true;
+
+  if(!straight){
+    ctx.beginPath();
+    ctx.moveTo(startPt.x,startPt.y);
+  }
 }
 function onMove(e){
-  updatePenRecent(e);
-  if(isPalmTouch(e)) return;
-
   if(tool==='hand' && panning){
+    const r=viewport.getBoundingClientRect();
     if(typeof e.movementX==='number'){ panX+=e.movementX; panY+=e.movementY; }
     else { if(!onMove._last) onMove._last={x:e.clientX,y:e.clientY}; panX+=e.clientX-onMove._last.x; panY+=e.clientY-onMove._last.y; onMove._last={x:e.clientX,y:e.clientY}; }
     updateViewportTransform(); return;
   }
   if(!drawing) return;
 
-  ctx.lineWidth=dynamicWidthFromPen(e,(size||4))*DPR;
   const straight=(straightKey || $('#uiStraight').checked);
-  if(!straight){ drawFreehandFrom(e); return; }
-
-  const p=pt(e); const sp=snapLine(startPt,p);
-  clear(cvGuide); const g=ctxGuide,d=DPR;
-  g.save(); g.lineCap=ctx.lineCap; g.lineWidth=ctx.lineWidth; g.strokeStyle='#7ec8ff'; g.setLineDash([6*d,6*d]);
-  g.beginPath(); g.moveTo(startPt.x,startPt.y); g.lineTo(sp.x,sp.y); g.stroke(); g.restore();
+  if(!straight){
+    const list=(e.getCoalescedEvents && e.getCoalescedEvents()) || [e];
+    for(const ev of list){ const p=pt(ev); ctx.lineTo(p.x,p.y); }
+    ctx.stroke(); // 連続パスをそのまま描く（途切れなし）
+    return;
+  }
+  // 直線プレビュー
+  const p=pt(e), sp=snapLine(startPt,p);
+  clear(cvGuide); const g=ctxGuide, d=DPR;
+  g.save(); g.lineCap=ctx.lineCap; g.lineWidth=ctx.lineWidth; g.strokeStyle='#7ec8ff';
+  g.setLineDash([6*d,6*d]); g.beginPath(); g.moveTo(startPt.x,startPt.y); g.lineTo(sp.x,sp.y); g.stroke(); g.restore();
 }
 function onUp(e){
-  updatePenRecent(e);
   if(tool==='hand' && panning){ panning=false; onMove._last=null; cv.style.cursor='grab'; return; }
   if(!drawing){ clear(cvGuide); return; }
 
   const straight=(straightKey || $('#uiStraight').checked);
-  if(straight){ const p=pt(e), sp=snapLine(startPt,p); setCtx(); ctx.lineWidth=dynamicWidthFromPen(e,(size||4))*DPR; ctx.beginPath(); ctx.moveTo(startPt.x,startPt.y); ctx.lineTo(sp.x,sp.y); ctx.stroke(); }
-  drawing=false; startPt=null; lastPt=null; clear(cvGuide);
+  if(straight){ const p=pt(e), sp=snapLine(startPt,p); setCtx(); ctx.beginPath(); ctx.moveTo(startPt.x,startPt.y); ctx.lineTo(sp.x,sp.y); ctx.stroke(); }
+  drawing=false; startPt=null; clear(cvGuide);
+
   if(DBG) logln(`evt: pu type=${e.pointerType} pres=${e.pressure??'?'} w=${e.width||0} h=${e.height||0}`);
 }
 cv.addEventListener('pointerdown',onDown,{passive:false});
@@ -392,7 +373,7 @@ $('#btnTextDel').addEventListener('click',()=>document.execCommand('delete',fals
 $('#btnTextBoxDel').addEventListener('click',()=>{const sel=window.getSelection();if(!sel.rangeCount)return;let el=sel.anchorNode;while(el&&!(el instanceof HTMLElement&&el.classList.contains('note-text')))el=el.parentNode;if(el)el.remove();});
 
 /* output */
-function composite(){const out=document.createElement('canvas');out.width=cv.width;out.height=cv.height;const o=out.getContext('2d');o.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()||'#0b1020';o.fillRect(0,0,out.width,out.height);o.drawImage(cvGrid,0,0);o.drawImage(cv,0,0);[...textLayer.querySelectorAll('.note-text')].forEach(n=>{const r=n.getBoundingClientRect(),L=textLayer.getBoundingClientRect();const x=((r.left-L.left)/zoom)*DPR,y=((r.top-L.top)/zoom)*DPR;o.fillStyle='#eaf3ff';o.font=(16*DPR)+'px system-ui';o.fillText(n.textContent.trim(),x,y+16*DPR)});return out;}
+function composite(){const out=document.createElement('canvas');out.width=cv.width;out.height=cv.height;const o=out.getContext('2d');o.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()||'#0b1020';o.fillRect(0,0,out.width,out.height);o.drawImage(cvGrid,0,0);o.drawImage(cv,0,0);[...textLayer.querySelectorAll('.note-text')].forEach(n=>{const r=n.getBoundingClientRect(),L=textLayer.getBoundingClientRect();const x=( (r.left-L.left) * (cv.width / (L.width||1)) ), y=( (r.top-L.top) * (cv.height / (L.height||1)) );o.fillStyle='#eaf3ff';o.font=(16*DPR)+'px system-ui';o.fillText(n.textContent.trim(),x,y+16*DPR)});return out;}
 $('#btnPng').addEventListener('click',()=>composite().toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='note-link.png';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),800)}));
 $('#btnPrint').addEventListener('click',()=>window.print());
 $('#btnShare').addEventListener('click',()=>{composite().toBlob(async b=>{const f=new File([b],'note.png',{type:'image/png'});if(navigator.share&&navigator.canShare&&navigator.canShare({files:[f]})){try{await navigator.share({files:[f],title:'Note Link'})}catch(e){}}else{const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download='note-link.png';a.click();setTimeout(()=>URL.revokeObjectURL(u),800)}});});
