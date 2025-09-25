@@ -40,6 +40,9 @@
   .dlg-ft{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid #2b2b2b}
   .dlg-ft button{border:1px solid #3a3a3a;background:#1b1b1b;color:#eee;border-radius:10px;padding:8px 12px;cursor:pointer}
 
+  /* デバッグオーバーレイ（?debug=1 のときだけJSで表示） */
+  .dbg{position:fixed;right:8px;top:52px;z-index:9999;background:#111a;border:1px solid #333;padding:8px 10px;border-radius:10px;font:12px/1.4 ui-monospace,monospace;white-space:pre;pointer-events:none}
+
   @media print{
     body{background:#fff;color:#000}
     .topbar{display:none}
@@ -96,7 +99,9 @@
 
 <script>
 (() => {
-  // ===== 既定（UIは触らず内部のみ） =====
+  // ===========================================================
+  // 設定（UIは触らず内部だけ）／デバッグ
+  // ===========================================================
   const DEFAULTS = {
     penColor: '#000000',
     markerColor: '#FFFF00',
@@ -105,170 +110,126 @@
     markerWidth: 18,
     eraser: { shape: 'circle', size: 24, guide: true }
   };
-
+  const qs = new URLSearchParams(location.search);
+  const DEBUG = qs.get('debug') === '1';
   const stage = document.getElementById('stage');
   const note  = document.getElementById('note');
   const ov    = document.getElementById('overlay');
   const ctx   = note.getContext('2d');
   const octx  = ov.getContext('2d');
 
-  // 入力が拾えない環境対策：複数ターゲット＋passive:false
-  const LISTENER_OPT = { passive:false };
+  // デバッグ表示（?debug=1）
+  let dbgEl = null, dbg = {};
+  function dbgInit(){
+    if(!DEBUG) return;
+    dbgEl = document.createElement('div'); dbgEl.className='dbg'; document.body.appendChild(dbgEl);
+    dbg.log = []; window.addEventListener('error', e=>{ dbg.log.push(String(e.error||e.message)); renderDbg(); });
+    window.addEventListener('unhandledrejection', e=>{ dbg.log.push('Promise:'+String(e.reason)); renderDbg(); });
+    renderDbg();
+  }
+  function renderDbg(){
+    if(!DEBUG || !dbgEl) return;
+    const r = stage.getBoundingClientRect();
+    const dpr = DPR();
+    dbgEl.textContent =
+`DPR=${dpr}
+stage=${Math.round(r.width)}x${Math.round(r.height)}
+noteWH=${note.width}x${note.height} css=${note.style.width||'-'} x ${note.style.height||'-'}
+tool=${state.tool} drawing=${state.drawing}
+events: down=${dbg.down||0} move=${dbg.move||0} up=${dbg.up||0}
+lastErr: ${dbg.log?.slice(-1)[0]||'-'}`;
+  }
 
   // DPI
   const DPR = () => Math.max(1, window.devicePixelRatio || 1);
 
-  // 実解像度同期（2段階のrAFでlayout完了後に確定）
-  function syncSize() {
-    const fix = () => {
-      const r = stage.getBoundingClientRect();
-      const dpr = DPR();
+  // 実サイズ同期（ResizeObserver + rAF二段）
+  function syncSize(){
+    const fix = ()=>{
+      const r = stage.getBoundingClientRect(); const dpr = DPR();
       const w = Math.max(2, Math.floor(r.width  * dpr));
       const h = Math.max(2, Math.floor(r.height * dpr));
-      if (note.width !== w)  note.width  = w;
-      if (note.height !== h) note.height = h;
-      if (ov.width !== w)    ov.width    = w;
-      if (ov.height !== h)   ov.height   = h;
+      if(note.width!==w)  note.width=w;
+      if(note.height!==h) note.height=h;
+      if(ov.width!==w)    ov.width=w;
+      if(ov.height!==h)   ov.height=h;
       note.style.width  = r.width + 'px';
       note.style.height = r.height + 'px';
       ov.style.width    = r.width + 'px';
       ov.style.height   = r.height + 'px';
       ctx.lineCap = ctx.lineJoin = 'round';
+      renderDbg();
     };
     requestAnimationFrame(()=>requestAnimationFrame(fix));
   }
-  syncSize();
-  addEventListener('resize', syncSize);
+  const ro = new ResizeObserver(syncSize); ro.observe(stage);
+  syncSize(); // 初期
 
   // 状態
-  const state = {
-    tool: 'pen',
-    drawing:false,
-    startX:0,startY:0,lastX:0,lastY:0,
-    straight:false,
-    pointerId:null
-  };
+  const state = { tool:'pen', drawing:false, startX:0,startY:0,lastX:0,lastY:0, straight:false, pointerId:null };
 
   // 設定
-  let penColor    = DEFAULTS.penColor;
-  let markerColor = DEFAULTS.markerColor;
-  let markerAlpha = DEFAULTS.markerAlpha;
-  let penWidth    = DEFAULTS.penWidth;
-  let markerWidth = DEFAULTS.markerWidth;
-  const eraser    = { ...DEFAULTS.eraser };
+  let penColor=DEFAULTS.penColor, markerColor=DEFAULTS.markerColor, markerAlpha=DEFAULTS.markerAlpha;
+  let penWidth=DEFAULTS.penWidth, markerWidth=DEFAULTS.markerWidth;
+  const eraser = { ...DEFAULTS.eraser };
 
-  // 位置計算
-  function posFromClient(clientX, clientY){
-    const r = note.getBoundingClientRect();
-    const dpr = DPR();
-    return { x:(clientX - r.left)*dpr, y:(clientY - r.top)*dpr };
-  }
+  // 位置
+  function posFromClient(x,y){ const r = note.getBoundingClientRect(); const dpr=DPR(); return {x:(x-r.left)*dpr, y:(y-r.top)*dpr}; }
 
-  // スタイル適用
+  // スタイル
   function useStyle(tool){
-    if(tool==='pen'){
-      ctx.globalCompositeOperation='source-over';
-      ctx.globalAlpha=1.0;
-      ctx.strokeStyle=penColor;
-      ctx.lineWidth=penWidth*DPR();
-    }else if(tool==='marker'){
-      ctx.globalCompositeOperation='source-over';
-      ctx.globalAlpha=markerAlpha;  // 直線/曲線 統一
-      ctx.strokeStyle=markerColor;
-      ctx.lineWidth=markerWidth*DPR();
-    }else{
-      ctx.globalCompositeOperation='destination-out';
-      ctx.globalAlpha=1.0;
-      ctx.lineWidth=eraser.size*DPR();
-    }
+    if(tool==='pen'){ ctx.globalCompositeOperation='source-over'; ctx.globalAlpha=1; ctx.strokeStyle=penColor; ctx.lineWidth=penWidth*DPR(); }
+    else if(tool==='marker'){ ctx.globalCompositeOperation='source-over'; ctx.globalAlpha=markerAlpha; ctx.strokeStyle=markerColor; ctx.lineWidth=markerWidth*DPR(); }
+    else{ ctx.globalCompositeOperation='destination-out'; ctx.globalAlpha=1; ctx.lineWidth=eraser.size*DPR(); }
+    ctx.lineCap=ctx.lineJoin='round';
   }
 
-  // 描画基本
-  function begin(x,y){
-    state.drawing=true; state.startX=state.lastX=x; state.startY=state.lastY=y;
-    ctx.beginPath(); ctx.moveTo(x,y);
-  }
-  function drag(x,y,straight){
-    ctx.beginPath();
-    if(straight){ ctx.moveTo(state.startX,state.startY); }
-    else{ ctx.moveTo(state.lastX,state.lastY); }
-    ctx.lineTo(x,y); ctx.stroke();
-    state.lastX=x; state.lastY=y;
-  }
-  function end(){ state.drawing=false; }
+  // 基本描画
+  function begin(x,y){ state.drawing=true; state.startX=state.lastX=x; state.startY=state.lastY=y; ctx.beginPath(); ctx.moveTo(x,y); renderDbg(); }
+  function drag(x,y,straight){ ctx.beginPath(); if(straight){ctx.moveTo(state.startX,state.startY);}else{ctx.moveTo(state.lastX,state.lastY);} ctx.lineTo(x,y); ctx.stroke(); state.lastX=x; state.lastY=y; }
+  function end(){ state.drawing=false; renderDbg(); }
 
   // ガイド
   function guide(x,y){
     octx.clearRect(0,0,ov.width,ov.height);
     if(state.tool!=='eraser'||!eraser.guide) return;
     const s = eraser.size*DPR();
-    octx.save();
-    octx.strokeStyle='rgba(0,0,0,.35)'; octx.lineWidth=2*DPR(); octx.setLineDash([6*DPR(),6*DPR()]);
-    if(eraser.shape==='circle'){ octx.beginPath(); octx.arc(x,y,s/2,0,Math.PI*2); octx.stroke(); }
-    else{ octx.strokeRect(x-s/2,y-s/2,s,s); }
+    octx.save(); octx.strokeStyle='rgba(0,0,0,.35)'; octx.lineWidth=2*DPR(); octx.setLineDash([6*DPR(),6*DPR()]);
+    if(eraser.shape==='circle'){ octx.beginPath(); octx.arc(x,y,s/2,0,Math.PI*2); octx.stroke(); } else { octx.strokeRect(x-s/2,y-s/2,s,s); }
     octx.restore();
   }
 
-  // —— Pointer
-  function onPointerDown(e){
-    e.preventDefault();
-    state.pointerId = e.pointerId ?? null;
-    note.setPointerCapture?.(e.pointerId);
-    const {x,y} = posFromClient(e.clientX, e.clientY);
-    if(state.tool==='eraser'){
-      useStyle('eraser');
-      const s = eraser.size*DPR();
-      if(eraser.shape==='circle'){ ctx.beginPath(); ctx.arc(x,y,s/2,0,Math.PI*2); ctx.fill(); }
-      else{ ctx.fillRect(x-s/2,y-s/2,s,s); }
-      guide(x,y); return;
-    }
+  // 入力（pointer + mouse/touch フォールバック）
+  const OPT = { passive:false };
+  function onPointerDown(e){ e.preventDefault(); dbg.down=(dbg.down||0)+1; renderDbg();
+    state.pointerId = e.pointerId ?? null; note.setPointerCapture?.(e.pointerId);
+    const {x,y} = posFromClient(e.clientX,e.clientY);
+    if(state.tool==='eraser'){ useStyle('eraser'); const s=eraser.size*DPR(); if(eraser.shape==='circle'){ctx.beginPath();ctx.arc(x,y,s/2,0,Math.PI*2);ctx.fill();} else {ctx.fillRect(x-s/2,y-s/2,s,s);} guide(x,y); return; }
     useStyle(state.tool); begin(x,y); guide(x,y);
   }
-  function onPointerMove(e){
-    if(e.type==='pointermove' && e.pointerId && state.pointerId && e.pointerId!==state.pointerId) return;
-    const {x,y} = posFromClient(e.clientX, e.clientY);
-    if(state.tool==='eraser'){
-      guide(x,y);
-      if(e.buttons & 1){
-        useStyle('eraser');
-        const s = eraser.size*DPR();
-        if(eraser.shape==='circle'){ ctx.beginPath(); ctx.arc(x,y,s/2,0,Math.PI*2); ctx.fill(); }
-        else{ ctx.fillRect(x-s/2,y-s/2,s,s); }
-      }
-      return;
-    }
-    if(!state.drawing){ guide(x,y); return; }
-    useStyle(state.tool); drag(x,y, e.shiftKey || state.straight); guide(x,y);
+  function onPointerMove(e){ dbg.move=(dbg.move||0)+1; if(e.pointerId&&state.pointerId&&e.pointerId!==state.pointerId) return; const {x,y}=posFromClient(e.clientX,e.clientY);
+    if(state.tool==='eraser'){ guide(x,y); if(e.buttons&1){ useStyle('eraser'); const s=eraser.size*DPR(); if(eraser.shape==='circle'){ctx.beginPath();ctx.arc(x,y,s/2,0,Math.PI*2);ctx.fill();} else {ctx.fillRect(x-s/2,y-s/2,s,s);} } return; }
+    if(!state.drawing){ guide(x,y); return; } useStyle(state.tool); drag(x,y, e.shiftKey||state.straight); guide(x,y);
   }
-  function onPointerUp(){
-    if(state.drawing) end();
-    octx.clearRect(0,0,ov.width,ov.height);
-    try{ if(state.pointerId!=null) note.releasePointerCapture?.(state.pointerId); }catch(_){}
-    state.pointerId=null;
-  }
+  function onPointerUp(e){ dbg.up=(dbg.up||0)+1; if(state.drawing) end(); octx.clearRect(0,0,ov.width,ov.height); try{ if(state.pointerId!=null) note.releasePointerCapture?.(state.pointerId); }catch(_){} state.pointerId=null; renderDbg(); }
 
-  // —— Mouse / Touch フォールバック
-  function onMouseDown(e){ if(e.button!==0) return; onPointerDown({ ...e, pointerId: -1, clientX:e.clientX, clientY:e.clientY, buttons:1, preventDefault:()=>e.preventDefault() }); }
-  function onMouseMove(e){ onPointerMove({ ...e, pointerId: -1, clientX:e.clientX, clientY:e.clientY }); }
-  function onMouseUp(){ onPointerUp(); }
-  function onTouchStart(e){ const t=e.changedTouches[0]; onPointerDown({ ...e, pointerId: -2, clientX:t.clientX, clientY:t.clientY, buttons:1, preventDefault:()=>e.preventDefault() }); }
-  function onTouchMove(e){ const t=e.changedTouches[0]; onPointerMove({ ...e, pointerId: -2, clientX:t.clientX, clientY:t.clientY }); e.preventDefault(); }
-  function onTouchEnd(){ onPointerUp(); }
+  function onMouseDown(e){ if(e.button!==0)return; onPointerDown({...e, pointerId:-1, clientX:e.clientX, clientY:e.clientY, buttons:1, preventDefault:()=>e.preventDefault()}); }
+  function onMouseMove(e){ onPointerMove({...e, pointerId:-1, clientX:e.clientX, clientY:e.clientY}); }
+  function onMouseUp(e){ onPointerUp(e); }
+  function onTouchStart(e){ const t=e.changedTouches[0]; onPointerDown({...e, pointerId:-2, clientX:t.clientX, clientY:t.clientY, buttons:1, preventDefault:()=>e.preventDefault()}); }
+  function onTouchMove(e){ const t=e.changedTouches[0]; onPointerMove({...e, pointerId:-2, clientX:t.clientX, clientY:t.clientY}); e.preventDefault(); }
+  function onTouchEnd(e){ onPointerUp(e); }
 
-  // 多重バインド（取りこぼし防止）
   [note, stage, document].forEach(el=>{
-    el.addEventListener('pointerdown', onPointerDown, LISTENER_OPT);
-    el.addEventListener('pointermove', onPointerMove, LISTENER_OPT);
-    el.addEventListener('pointerup',   onPointerUp,   LISTENER_OPT);
-  });
-  // フォールバック
-  [note, stage, document].forEach(el=>{
-    el.addEventListener('mousedown', onMouseDown, LISTENER_OPT);
-    el.addEventListener('mousemove', onMouseMove, LISTENER_OPT);
-    el.addEventListener('mouseup',   onMouseUp,   LISTENER_OPT);
-    el.addEventListener('touchstart',onTouchStart, LISTENER_OPT);
-    el.addEventListener('touchmove', onTouchMove,  LISTENER_OPT);
-    el.addEventListener('touchend',  onTouchEnd,   LISTENER_OPT);
+    el.addEventListener('pointerdown', onPointerDown, OPT);
+    el.addEventListener('pointermove', onPointerMove, OPT);
+    el.addEventListener('pointerup',   onPointerUp,   OPT);
+    el.addEventListener('mousedown',   onMouseDown,   OPT);
+    el.addEventListener('mousemove',   onMouseMove,   OPT);
+    el.addEventListener('mouseup',     onMouseUp,     OPT);
+    el.addEventListener('touchstart',  onTouchStart,  OPT);
+    el.addEventListener('touchmove',   onTouchMove,   OPT);
+    el.addEventListener('touchend',    onTouchEnd,    OPT);
   });
 
   // Hotkeys（UIは触らず補助のみ）
@@ -281,6 +242,7 @@
     if(e.key.toLowerCase()==='r'){ eraser.shape=eraser.shape==='circle'?'square':'circle'; syncDlg(); }
     if(e.key==='['){ eraser.size=Math.max(4,eraser.size-5); syncDlg(); }
     if(e.key===']'){ eraser.size=Math.min(200,eraser.size+5); syncDlg(); }
+    renderDbg();
   });
   addEventListener('keyup',(e)=>{ if(e.key==='Shift') state.straight=false; });
 
@@ -307,8 +269,17 @@
   $('guideOff').addEventListener('click',()=>{ eraser.guide=false; syncDlg(); });
   $('dlgClose').addEventListener('click', closeDlg);
 
-  // 既定：ペン（黒）、マーカー（黄50%）
-  // 直線=Shift、マーカーは直線/曲線とも同じα
+  // スモークテスト：起動直後に中央へ黒点を1px描画（描けるか確認）
+  function smoke(){
+    const x = note.width/2, y = note.height/2;
+    ctx.save(); useStyle('pen'); ctx.beginPath(); ctx.arc(x,y, 2*DPR(), 0, Math.PI*2); ctx.fillStyle='#000'; ctx.fill(); ctx.restore();
+  }
+
+  // 初期化
+  dbgInit();
+  syncSize();
+  smoke(); // 真っ白ならここで中央に小さな黒点が出る
+
 })();
 </script>
 </body>
