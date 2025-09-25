@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>NOTE LINK — v0.8.0 / B-REL6-HF1</title>
 <style>
-  :root{ --a4w:794px; --a4h:1123px; }
+  :root{ --a4w:794px; --a4h:1123px; } /* 210×297mm 相当 @96dpi */
   html,body{height:100%}
   body{margin:0;background:#1b1b1b;color:#f4f4f4;font-family:system-ui,"Noto Sans JP",sans-serif}
   .topbar{height:44px;display:flex;align-items:center;gap:12px;padding:0 14px;background:#111;border-bottom:1px solid #2a2a2a}
@@ -16,12 +16,10 @@
   .a4-stage{
     position:relative;background:#fff;border:1px solid #ddd;box-shadow:0 2px 12px rgba(0,0,0,.35);
     width:var(--a4w);height:var(--a4h);
-    /* 重要：ジェスチャ干渉を完全停止 */
-    touch-action:none;-ms-touch-action:none;user-select:none
+    touch-action:none;user-select:none;
   }
-  canvas{image-rendering:crisp-edges;touch-action:none;-ms-touch-action:none;user-select:none;pointer-events:auto}
-  #note{position:absolute;left:0;top:0;width:100%;height:100%}
-  #overlay{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
+  canvas{position:absolute;left:0;top:0;width:100%;height:100%;image-rendering:crisp-edges;touch-action:none;user-select:none}
+  #overlay{pointer-events:none}
 
   /* 消しゴム設定ダイアログ（内部UIのみ追加） */
   dialog#eraserDialog{
@@ -42,9 +40,6 @@
   .dlg-ft{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid #2b2b2b}
   .dlg-ft button{border:1px solid #3a3a3a;background:#1b1b1b;color:#eee;border-radius:10px;padding:8px 12px;cursor:pointer}
 
-  /* デバッグ（?debug=1 のときJSで挿入） */
-  .dbg{position:fixed;right:8px;top:52px;z-index:9999;background:#111a;border:1px solid #333;padding:8px 10px;border-radius:10px;font:12px ui-monospace,monospace;white-space:pre;pointer-events:none}
-
   @media print{
     body{background:#fff;color:#000}
     .topbar{display:none}
@@ -56,7 +51,7 @@
 <body oncontextmenu="return false">
   <div class="topbar">
     <div class="ver">NOTE LINK — v0.8.0 / <strong>B-REL6-HF1</strong></div>
-    <div class="kbd">（補助）消しゴム設定: Ctrl+E ／ 形状切替: R ／ サイズ: [ / ] ／ モバイルは長押し</div>
+    <div class="kbd">直線: Shift ／ ツール: 1=ペン 2=マーカー 3=消しゴム ／ 設定: Ctrl+E（モバイルは長押し）</div>
   </div>
 
   <div class="wrap">
@@ -68,6 +63,7 @@
     </main>
   </div>
 
+  <!-- 消しゴム設定ダイアログ（内部UIだけ追加） -->
   <dialog id="eraserDialog">
     <div class="dlg-hd">消しゴム 設定</div>
     <div class="dlg-bd">
@@ -94,14 +90,16 @@
         </div>
       </div>
       <div class="mmnote" id="sizeInfo">現在：24 px（約 6.35 mm）</div>
-      <div class="mmnote">ショートカット：形状 <b>R</b> ／ サイズ <b>[</b> <b>]</b> ／ ダイアログ <b>Ctrl+E</b> ／ モバイルは長押し</div>
+      <div class="mmnote">ショートカット：形状 R ／ サイズ [ / ] ／ ダイアログ Ctrl+E ／ モバイル長押し</div>
     </div>
-    <div class="dlg-ft"><button id="dlgClose">閉じる</button></div>
+    <div class="dlg-ft">
+      <button id="dlgClose">閉じる</button>
+    </div>
   </dialog>
 
 <script>
 (() => {
-  // ============ 設定（内部のみ）・デバッグ ============
+  /* ===== 既定（UI不変／内部だけ） ===== */
   const DEFAULTS = {
     penColor: '#000000',
     markerColor: '#FFFF00',
@@ -110,8 +108,6 @@
     markerWidth: 18,
     eraser: { shape: 'circle', size: 24, guide: true }
   };
-  const qs = new URLSearchParams(location.search);
-  const DEBUG = qs.get('debug') === '1';
 
   const stage = document.getElementById('stage');
   const note  = document.getElementById('note');
@@ -119,33 +115,14 @@
   const ctx   = note.getContext('2d');
   const octx  = ov.getContext('2d');
 
-  // ---- デバッグ
-  let dbgEl=null, dbg={};
-  function dbgInit(){
-    if(!DEBUG) return;
-    dbgEl=document.createElement('div'); dbgEl.className='dbg'; document.body.appendChild(dbgEl);
-    dbg.log=[]; window.addEventListener('error',e=>{dbg.log.push(String(e.error||e.message)); renderDbg();},{capture:true});
-    window.addEventListener('unhandledrejection',e=>{dbg.log.push('Promise:'+String(e.reason)); renderDbg();},{capture:true});
-    renderDbg();
-  }
-  function renderDbg(){
-    if(!DEBUG||!dbgEl) return;
-    const r=stage.getBoundingClientRect(); const dpr=DPR();
-    dbgEl.textContent=
-`DPR=${dpr}
-stage=${Math.round(r.width)}x${Math.round(r.height)}
-noteWH=${note.width}x${note.height} css=${note.style.width||'-'} x ${note.style.height||'-'}
-tool=${state.tool} drawing=${state.drawing}
-events: down=${dbg.down||0} move=${dbg.move||0} up=${dbg.up||0}
-lastErr: ${dbg.log?.slice(-1)[0]||'-'}`;
-  }
+  const DPR = () => Math.max(1, window.devicePixelRatio || 1);
 
-  // ---- DPI/サイズ同期（ResizeObserver + rAF二段）
-  const DPR = ()=>Math.max(1, window.devicePixelRatio || 1);
+  /* ---- A4領域サイズ同期（rAF二段＋ResizeObserver） ---- */
   function syncSize(){
-    const fix=()=>{
-      const r=stage.getBoundingClientRect(), dpr=DPR();
-      const w=Math.max(2, Math.floor(r.width*dpr)), h=Math.max(2, Math.floor(r.height*dpr));
+    const fix = ()=>{
+      const r = stage.getBoundingClientRect(), d = DPR();
+      const w = Math.max(2, Math.floor(r.width  * d));
+      const h = Math.max(2, Math.floor(r.height * d));
       if(note.width!==w)  note.width=w;
       if(note.height!==h) note.height=h;
       if(ov.width!==w)    ov.width=w;
@@ -153,104 +130,144 @@ lastErr: ${dbg.log?.slice(-1)[0]||'-'}`;
       note.style.width=r.width+'px'; note.style.height=r.height+'px';
       ov.style.width=r.width+'px';   ov.style.height=r.height+'px';
       ctx.lineCap=ctx.lineJoin='round';
-      renderDbg();
     };
     requestAnimationFrame(()=>requestAnimationFrame(fix));
   }
-  new ResizeObserver(syncSize).observe(stage);
-  syncSize();
+  new ResizeObserver(syncSize).observe(stage); syncSize();
 
-  // ---- 状態
-  const state={ tool:'pen', drawing:false, startX:0,startY:0,lastX:0,lastY:0, straight:false, pointerId:null };
-  let penColor=DEFAULTS.penColor, markerColor=DEFAULTS.markerColor, markerAlpha=DEFAULTS.markerAlpha;
-  let penWidth=DEFAULTS.penWidth, markerWidth=DEFAULTS.markerWidth;
-  const eraser={ ...DEFAULTS.eraser };
+  /* ---- 状態 ---- */
+  const state = {
+    tool:'pen', drawing:false,
+    startX:0,startY:0,lastX:0,lastY:0,
+    straightActive:false  // ★ このStrokeの間だけ直線
+  };
 
-  // ---- 位置
-  function pos(x,y){ const r=note.getBoundingClientRect(), dpr=DPR(); return {x:(x-r.left)*dpr, y:(y-r.top)*dpr}; }
+  // 色・太さ
+  let penColor=DEFAULTS.penColor, penWidth=DEFAULTS.penWidth;
+  let markerColor=DEFAULTS.markerColor, markerWidth=DEFAULTS.markerWidth, markerAlpha=DEFAULTS.markerAlpha;
+  const eraser = { ...DEFAULTS.eraser };
 
-  // ---- スタイル
+  /* ---- スタイル適用 ---- */
   function useStyle(tool){
-    if(tool==='pen'){ ctx.globalCompositeOperation='source-over'; ctx.globalAlpha=1; ctx.strokeStyle=penColor; ctx.lineWidth=penWidth*DPR(); }
-    else if(tool==='marker'){ ctx.globalCompositeOperation='source-over'; ctx.globalAlpha=markerAlpha; ctx.strokeStyle=markerColor; ctx.lineWidth=markerWidth*DPR(); }
-    else{ ctx.globalCompositeOperation='destination-out'; ctx.globalAlpha=1; ctx.lineWidth=eraser.size*DPR(); }
+    if(tool==='pen'){
+      ctx.globalCompositeOperation='source-over';
+      ctx.globalAlpha=1;
+      ctx.strokeStyle=penColor;
+      ctx.lineWidth=penWidth*DPR();
+    }else if(tool==='marker'){
+      ctx.globalCompositeOperation='source-over';
+      ctx.globalAlpha=markerAlpha;        // 直線/曲線で統一
+      ctx.strokeStyle=markerColor;
+      ctx.lineWidth=markerWidth*DPR();
+    }else{ // eraser
+      ctx.globalCompositeOperation='destination-out';
+      ctx.globalAlpha=1;
+      ctx.lineWidth=eraser.size*DPR();
+    }
     ctx.lineCap=ctx.lineJoin='round';
   }
 
-  // ---- 描画
-  function begin(x,y){ state.drawing=true; state.startX=state.lastX=x; state.startY=state.lastY=y; ctx.beginPath(); ctx.moveTo(x,y); renderDbg(); }
-  function drag(x,y,straight){ ctx.beginPath(); (straight?ctx.moveTo(state.startX,state.startY):ctx.moveTo(state.lastX,state.lastY)); ctx.lineTo(x,y); ctx.stroke(); state.lastX=x; state.lastY=y; }
-  function end(){ state.drawing=false; renderDbg(); }
+  /* ---- 座標 ---- */
+  function pos(e){
+    const r = note.getBoundingClientRect(), d = DPR();
+    return { x:(e.clientX - r.left)*d, y:(e.clientY - r.top)*d };
+  }
 
-  // ---- ガイド
+  /* ---- Stroke ---- */
+  function begin(x,y){
+    state.drawing=true;
+    state.startX=state.lastX=x;
+    state.startY=state.lastY=y;
+    ctx.beginPath(); ctx.moveTo(x,y);
+  }
+  function drag(x,y){
+    ctx.beginPath();
+    if(state.straightActive){ ctx.moveTo(state.startX, state.startY); }
+    else{ ctx.moveTo(state.lastX, state.lastY); }
+    ctx.lineTo(x,y); ctx.stroke();
+    state.lastX=x; state.lastY=y;
+  }
+  function end(){ state.drawing=false; }
+
+  /* ---- ガイド（消しゴム時のみ） ---- */
   function guide(x,y){
     octx.clearRect(0,0,ov.width,ov.height);
-    if(state.tool!=='eraser'||!eraser.guide) return;
-    const s=eraser.size*DPR();
-    octx.save(); octx.strokeStyle='rgba(0,0,0,.35)'; octx.lineWidth=2*DPR(); octx.setLineDash([6*DPR(),6*DPR()]);
-    if(eraser.shape==='circle'){ octx.beginPath(); octx.arc(x,y,s/2,0,Math.PI*2); octx.stroke(); } else { octx.strokeRect(x-s/2,y-s/2,s,s); }
+    if(state.tool!=='eraser' || !eraser.guide) return;
+    const s = eraser.size*DPR();
+    octx.save();
+    octx.strokeStyle='rgba(0,0,0,.35)'; octx.lineWidth=2*DPR(); octx.setLineDash([6*DPR(),6*DPR()]);
+    if(eraser.shape==='circle'){ octx.beginPath(); octx.arc(x,y,s/2,0,Math.PI*2); octx.stroke(); }
+    else{ octx.strokeRect(x-s/2,y-s/2,s,s); }
     octx.restore();
   }
 
-  // ---- 入力（全層・キャプチャ段階で必ず拾う）
-  const OPT = { passive:false, capture:true };
-  function onPointerDown(e){ e.preventDefault(); dbg.down=(dbg.down||0)+1; renderDbg();
-    state.pointerId=e.pointerId??null; note.setPointerCapture?.(e.pointerId);
-    const {x,y}=pos(e.clientX,e.clientY);
-    if(state.tool==='eraser'){ useStyle('eraser'); const s=eraser.size*DPR(); if(eraser.shape==='circle'){ctx.beginPath();ctx.arc(x,y,s/2,0,Math.PI*2);ctx.fill();} else {ctx.fillRect(x-s/2,y-s/2,s,s);} guide(x,y); return; }
-    useStyle(state.tool); begin(x,y); guide(x,y);
+  /* ---- 入力（canvasのみ・最小構成） ---- */
+  note.addEventListener('pointerdown', (e)=>{
+    e.preventDefault();
+    note.setPointerCapture?.(e.pointerId);
+    const {x,y} = pos(e);
+    state.straightActive = !!e.shiftKey; // ★このStrokeに限り有効
+    if(state.tool==='eraser'){
+      useStyle('eraser');
+      const s = eraser.size*DPR();
+      if(eraser.shape==='circle'){ ctx.beginPath(); ctx.arc(x,y,s/2,0,Math.PI*2); ctx.fill(); }
+      else{ ctx.fillRect(x-s/2,y-s/2,s,s); }
+      guide(x,y);
+      return;
+    }
+    useStyle(state.tool);
+    begin(x,y);
+    guide(x,y);
+  }, {passive:false});
+
+  note.addEventListener('pointermove', (e)=>{
+    const {x,y} = pos(e);
+    if(state.tool==='eraser'){
+      guide(x,y);
+      if(e.buttons & 1){
+        useStyle('eraser');
+        const s = eraser.size*DPR();
+        if(eraser.shape==='circle'){ ctx.beginPath(); ctx.arc(x,y,s/2,0,Math.PI*2); ctx.fill(); }
+        else{ ctx.fillRect(x-s/2,y-s/2,s,s); }
+      }
+      return;
+    }
+    if(!state.drawing){ guide(x,y); return; }
+    useStyle(state.tool);
+    drag(x,y);
+    guide(x,y);
+  }, {passive:false});
+
+  function endAll(){
+    if(state.drawing) end();
+    octx.clearRect(0,0,ov.width,ov.height);
   }
-  function onPointerMove(e){ dbg.move=(dbg.move||0)+1; const {x,y}=pos(e.clientX,e.clientY);
-    if(state.tool==='eraser'){ guide(x,y); if(e.buttons&1){ useStyle('eraser'); const s=eraser.size*DPR(); if(eraser.shape==='circle'){ctx.beginPath();ctx.arc(x,y,s/2,0,Math.PI*2);ctx.fill();} else {ctx.fillRect(x-s/2,y-s/2,s,s);} } return; }
-    if(!state.drawing){ guide(x,y); return; } useStyle(state.tool); drag(x,y, e.shiftKey||state.straight); guide(x,y);
-  }
-  function onPointerUp(e){ dbg.up=(dbg.up||0)+1; if(state.drawing) end(); octx.clearRect(0,0,ov.width,ov.height); try{ if(state.pointerId!=null) note.releasePointerCapture?.(state.pointerId); }catch(_){} state.pointerId=null; renderDbg(); }
+  note.addEventListener('pointerup', endAll, {passive:true});
+  note.addEventListener('pointercancel', endAll, {passive:true});
+  note.addEventListener('pointerleave', endAll, {passive:true});
 
-  // Mouse/Touch フォールバック（同じく capture:true）
-  function onMouseDown(e){ if(e.button!==0)return; onPointerDown({...e, pointerId:-1, clientX:e.clientX, clientY:e.clientY, buttons:1, preventDefault:()=>e.preventDefault()}); }
-  function onMouseMove(e){ onPointerMove({...e, pointerId:-1, clientX:e.clientX, clientY:e.clientY}); }
-  function onMouseUp(e){ onPointerUp(e); }
-  function onTouchStart(e){ const t=e.changedTouches[0]; onPointerDown({...e, pointerId:-2, clientX:t.clientX, clientY:t.clientY, buttons:1, preventDefault:()=>e.preventDefault()}); }
-  function onTouchMove(e){ const t=e.changedTouches[0]; onPointerMove({...e, pointerId:-2, clientX:t.clientX, clientY:t.clientY}); e.preventDefault(); }
-  function onTouchEnd(e){ onPointerUp(e); }
-
-  ;[window, document, stage, note].forEach(el=>{
-    el.addEventListener('pointerdown', onPointerDown, OPT);
-    el.addEventListener('pointermove', onPointerMove, OPT);
-    el.addEventListener('pointerup',   onPointerUp,   OPT);
-    el.addEventListener('mousedown',   onMouseDown,   OPT);
-    el.addEventListener('mousemove',   onMouseMove,   OPT);
-    el.addEventListener('mouseup',     onMouseUp,     OPT);
-    el.addEventListener('touchstart',  onTouchStart,  OPT);
-    el.addEventListener('touchmove',   onTouchMove,   OPT);
-    el.addEventListener('touchend',    onTouchEnd,    OPT);
-  });
-
-  // ---- ホットキー（補助）
-  addEventListener('keydown',(e)=>{
+  /* ---- ツール（既存UI前提。補助ホットキーのみ） ---- */
+  addEventListener('keydown', (e)=>{
     if(e.ctrlKey && e.key.toLowerCase()==='e'){ e.preventDefault(); openDlg(); }
     if(e.key==='1') state.tool='pen';
     if(e.key==='2') state.tool='marker';
     if(e.key==='3') state.tool='eraser';
-    if(e.key==='Shift') state.straight=true;
-    if(e.key.toLowerCase()==='r'){ eraser.shape=eraser.shape==='circle'?'square':'circle'; syncDlg(); }
+    if(e.key.toLowerCase()==='r'){ eraser.shape = (eraser.shape==='circle' ? 'square':'circle'); syncDlg(); }
     if(e.key==='['){ eraser.size=Math.max(4,eraser.size-5); syncDlg(); }
     if(e.key===']'){ eraser.size=Math.min(200,eraser.size+5); syncDlg(); }
-    renderDbg();
   });
-  addEventListener('keyup',(e)=>{ if(e.key==='Shift') state.straight=false; });
 
-  // ---- 消しゴム設定ダイアログ（内部のみ）
-  const dlg=document.getElementById('eraserDialog');
-  const $=id=>document.getElementById(id);
-  function pxToMm(px){ return px*25.4/96; }
+  /* ---- 消しゴム設定ダイアログ（内部UIのみ） ---- */
+  const dlg = document.getElementById('eraserDialog');
+  const $ = (id)=>document.getElementById(id);
+  const pxToMm = (px)=>px*25.4/96;
   function openDlg(){ syncDlg(); dlg.showModal?.(); }
   function closeDlg(){ dlg.close?.(); }
   function syncDlg(){
     $('shapeCircle').setAttribute('aria-pressed', eraser.shape==='circle');
     $('shapeSquare').setAttribute('aria-pressed', eraser.shape==='square');
-    $('sizeRange').value=eraser.size;
-    $('sizeInfo').textContent=`現在：${eraser.size} px（約 ${(pxToMm(eraser.size)).toFixed(2)} mm）`;
+    $('sizeRange').value = eraser.size;
+    $('sizeInfo').textContent = `現在：${eraser.size} px（約 ${(pxToMm(eraser.size)).toFixed(2)} mm）`;
     $('guideOn').setAttribute('aria-pressed', eraser.guide===true);
     $('guideOff').setAttribute('aria-pressed', eraser.guide===false);
   }
@@ -258,29 +275,19 @@ lastErr: ${dbg.log?.slice(-1)[0]||'-'}`;
   $('shapeSquare').addEventListener('click', ()=>{ eraser.shape='square'; syncDlg(); });
   $('sizeDec').addEventListener('click', ()=>{ eraser.size=Math.max(4,eraser.size-5); syncDlg(); });
   $('sizeInc').addEventListener('click', ()=>{ eraser.size=Math.min(200,eraser.size+5); syncDlg(); });
-  $('sizeRange').addEventListener('input',(e)=>{ eraser.size=+e.target.value; syncDlg(); });
-  $('guideOn').addEventListener('click',()=>{ eraser.guide=true; syncDlg(); });
-  $('guideOff').addEventListener('click',()=>{ eraser.guide=false; syncDlg(); });
+  $('sizeRange').addEventListener('input', (e)=>{ eraser.size=+e.target.value; syncDlg(); });
+  $('guideOn').addEventListener('click', ()=>{ eraser.guide=true; syncDlg(); });
+  $('guideOff').addEventListener('click', ()=>{ eraser.guide=false; syncDlg(); });
   $('dlgClose').addEventListener('click', closeDlg);
 
-  // ---- モバイル用：長押し（600ms）で消しゴム設定を開く
-  let longPressTimer=null;
-  function startLongPressOpen(){ clearTimeout(longPressTimer); longPressTimer=setTimeout(()=>{ if(state.tool==='eraser') openDlg(); },600); }
-  function cancelLongPress(){ clearTimeout(longPressTimer); }
-  stage.addEventListener('pointerdown', startLongPressOpen, {passive:true});
-  stage.addEventListener('pointermove', cancelLongPress, {passive:true});
-  stage.addEventListener('pointerup',   cancelLongPress, {passive:true});
-  stage.addEventListener('pointercancel', cancelLongPress, {passive:true});
+  /* モバイル：消しゴム選択中は長押しで設定 */
+  let longPress=null;
+  stage.addEventListener('pointerdown', ()=>{ clearTimeout(longPress); longPress=setTimeout(()=>{ if(state.tool==='eraser') openDlg(); }, 600); }, {passive:true});
+  stage.addEventListener('pointermove', ()=>{ clearTimeout(longPress); }, {passive:true});
+  stage.addEventListener('pointerup',   ()=>{ clearTimeout(longPress); }, {passive:true});
+  stage.addEventListener('pointercancel',()=>{ clearTimeout(longPress); }, {passive:true});
 
-  // ---- スモーク：中央に黒点（描画可否確認）
-  function smoke(){
-    const x=note.width/2, y=note.height/2;
-    ctx.save(); useStyle('pen'); ctx.beginPath(); ctx.arc(x,y, 2*DPR(), 0, Math.PI*2); ctx.fillStyle='#000'; ctx.fill(); ctx.restore();
-  }
-
-  // 初期化
-  dbgInit(); syncSize(); smoke();
-
+  /* 初期はペン（黒）、マーカーは黄50% */
 })();
 </script>
 </body>
