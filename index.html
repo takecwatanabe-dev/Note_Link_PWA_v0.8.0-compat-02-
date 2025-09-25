@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>NOTE LINK — v0.8.0-compat-02d-fix3</title>
+<title>NOTE LINK — v0.8.0-compat-02d-onefile-fix4</title>
 <style>
   :root{
     --bg:#0f1115; --pane:#171a21; --fg:#e9eef5; --muted:#92a0b3; --accent:#50C878;
@@ -50,7 +50,7 @@
   <div id="topbar" role="toolbar" aria-label="Top bar">
     <button id="toggleSidebarBtn" title="サイドバー開閉">☰</button>
     <div class="title">NOTE LINK</div>
-    <div class="version">v0.8.0-compat-02d-fix3</div>
+    <div class="version">v0.8.0-compat-02d-onefile-fix4</div>
     <div class="spacer"></div>
     <button id="undoBtn" title="元に戻す (Ctrl+Z)">↶</button>
     <button id="redoBtn" title="やり直し (Ctrl+Shift+Z)">↷</button>
@@ -127,404 +127,395 @@
 
 <script>
 (()=>{
-  const $ = (q,root=document)=>root.querySelector(q);
-  const $$ = (q,root=document)=>Array.from(root.querySelectorAll(q));
-  const qs = new URLSearchParams(location.search);
-  const DEBUG_URL = qs.get('debug') === '1';
+// ====== 基本ユーティリティ ======
+const $ = (q,root=document)=>root.querySelector(q);
+const $$ = (q,root=document)=>Array.from(root.querySelectorAll(q));
+const qs = new URLSearchParams(location.search);
+const DEBUG_URL = qs.get('debug') === '1';
 
-  const canvas = $('#canvas');
-  const wrap = $('#canvasWrap');
-  const ctx = canvas.getContext('2d');
+const canvas = $('#canvas');
+const wrap = $('#canvasWrap');
+const ctx = canvas.getContext('2d');
 
-  const support = {
-    dpi:96,
-    get mm2px(){ return this.dpi/25.4; },
-    worldFromClient(x,y){
-      const rect = canvas.getBoundingClientRect();
-      const cx = (x - rect.left);
-      const cy = (y - rect.top);
-      return { x:(cx - state.tx)/state.scale, y:(cy - state.ty)/state.scale };
-    },
-    clientFromEvent(e){
-      const rect = canvas.getBoundingClientRect();
-      return { x:(e.clientX - rect.left), y:(e.clientY - rect.top) };
-    }
+const support = {
+  dpi:96, // CSS基準DPI
+  get mm2px(){ return this.dpi/25.4; },
+  worldFromClient(x,y){
+    const rect = canvas.getBoundingClientRect();
+    const cx = (x - rect.left);
+    const cy = (y - rect.top);
+    return { x:(cx - state.tx)/state.scale, y:(cy - state.ty)/state.scale };
+  },
+  clientFromEvent(e){
+    const rect = canvas.getBoundingClientRect();
+    return { x:(e.clientX - rect.left), y:(e.clientY - rect.top) };
+  }
+};
+
+// ====== 既定値（UIは元のまま、内部設定のみ） ======
+const defaults = {
+  pen:    { color:'#000000', widthMM:2.0 },
+  marker: { color:'#FFFF00', widthMM:6.0, opacity:0.5 }, // 曲線/直線とも同じ不透明度
+  eraser: { widthMM:8.0 } // 形は円（固定）
+};
+
+// ====== 状態 ======
+const state = {
+  tool:'pen',
+  scale:1, tx:0, ty:0,
+  drawing:false, currentStroke:null, pointerId:null,
+  strokes:[], redoStack:[],
+  placingText:null,
+  settings: JSON.parse(JSON.stringify(defaults)),
+  eraserCursor:{visible:false, cx:0, cy:0},
+  _fitted:false,
+  _lastWrapSize:{w:0,h:0}
+};
+
+// ====== 参照 ======
+const tools = $$('#sidebar .tool');
+const sidebar = $('#sidebar');
+const sidebarToggle = $('#sidebarToggle');
+const topToggleBtn = $('#toggleSidebarBtn');
+const widthLabelTitle = $('#widthLabelTitle');
+const widthLabel = $('#widthLabel');
+const widthRange = $('#widthRange');
+const colorSection = $('#colorSection');
+const colorPick = $('#colorPick');
+const palmCheck = $('#palmCheck');
+const undoBtn = $('#undoBtn'), redoBtn = $('#redoBtn');
+const debugBox = $('#debug');
+const gearBtn = $('#gearBtn'), gearModal = $('#gearModal'), gearClose = $('#gearClose');
+const debugCheck = $('#debugCheck');
+
+// ====== Canvas サイズ調整（単一HTMLで完結） ======
+function fitCanvas(force=false){
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  if(!force && w===state._lastWrapSize.w && h===state._lastWrapSize.h) return;
+  state._lastWrapSize = {w,h};
+  if(w<=0 || h<=0) return;
+
+  canvas.style.width = w+'px'; canvas.style.height = h+'px';
+  canvas.width = Math.floor(w * dpr);
+  canvas.height = Math.floor(h * dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+
+  if(!state._fitted){
+    state.scale = 1; state.tx = 0; state.ty = 0; state._fitted=true;
+  }
+  render();
+}
+window.addEventListener('DOMContentLoaded', ()=>fitCanvas(true));
+window.addEventListener('load', ()=>fitCanvas(true));
+window.addEventListener('resize', ()=>fitCanvas(true), {passive:true});
+
+// ====== サイドバー開閉 ======
+function toggleSidebar(){
+  sidebar.classList.toggle('collapsed');
+  sidebarToggle.textContent = sidebar.classList.contains('collapsed') ? '▶' : '◀';
+  fitCanvas(true);
+}
+sidebarToggle.addEventListener('pointerdown', e=>{e.preventDefault(); toggleSidebar();});
+topToggleBtn.addEventListener('click', toggleSidebar);
+
+// ====== ツール & UI（元の構成のまま） ======
+function applyToolUI(){
+  const t = state.tool;
+  tools.forEach(b=>b.classList.toggle('active', b.dataset.tool===t));
+  if(t==='pen'){
+    widthLabelTitle.textContent = '太さ（ペン）';
+    widthRange.value = state.settings.pen.widthMM;
+    colorPick.value = state.settings.pen.color;
+    colorSection.hidden=false;
+  }else if(t==='marker'){
+    widthLabelTitle.textContent = '太さ（マーカー）';
+    widthRange.value = state.settings.marker.widthMM;
+    colorPick.value = state.settings.marker.color;
+    colorSection.hidden=false;
+  }else if(t==='eraser'){
+    widthLabelTitle.textContent = '消しゴムの大きさ';
+    widthRange.value = state.settings.eraser.widthMM;
+    colorSection.hidden=true;
+  }else{ // hand
+    widthLabelTitle.textContent = '太さ';
+    colorSection.hidden=true;
+  }
+  updateWidthLabel();
+}
+function setTool(t){ state.tool=t; applyToolUI(); }
+tools.forEach(b=>b.addEventListener('click', ()=>setTool(b.dataset.tool)));
+setTool('pen');
+
+function updateWidthLabel(){
+  const mm = parseFloat(widthRange.value);
+  const pt = mm * 2.83465;
+  widthLabel.textContent = `(${mm.toFixed(1)} mm / ${pt.toFixed(1)} pt)`;
+  if(state.tool==='pen') state.settings.pen.widthMM = mm;
+  else if(state.tool==='marker') state.settings.marker.widthMM = mm;
+  else if(state.tool==='eraser') state.settings.eraser.widthMM = mm;
+  render();
+}
+widthRange.addEventListener('input', updateWidthLabel);
+colorPick.addEventListener('input', ()=>{
+  if(state.tool==='pen') state.settings.pen.color = colorPick.value;
+  else if(state.tool==='marker') state.settings.marker.color = colorPick.value;
+});
+
+// ====== Undo/Redo ======
+function commitStroke(){
+  if(state.currentStroke){
+    state.strokes.push(state.currentStroke);
+    state.currentStroke = null;
+    state.redoStack.length = 0;
+  }
+  render();
+}
+undoBtn.addEventListener('click', ()=>{
+  if(state.strokes.length){ state.redoStack.push(state.strokes.pop()); render(); }
+});
+redoBtn.addEventListener('click', ()=>{
+  if(state.redoStack.length){ state.strokes.push(state.redoStack.pop()); render(); }
+});
+window.addEventListener('keydown', (e)=>{
+  if(e.ctrlKey && e.key.toLowerCase()==='z'){ e.preventDefault(); e.shiftKey ? redoBtn.click() : undoBtn.click(); }
+});
+
+// ====== テキスト ======
+const textModal = $('#textModal'), textInput = $('#textInput');
+const textOk = $('#textOk'), textCancel = $('#textCancel');
+const textSize = $('#textSize'), textColor = $('#textColor');
+$('#textBtn').addEventListener('click', ()=>{ textModal.hidden=false; textInput.focus(); });
+function closeTextModal(){ textModal.hidden=true; }
+textCancel.addEventListener('click', closeTextModal);
+window.addEventListener('keydown', (e)=>{ if(!textModal.hidden && e.key==='Escape'){ closeTextModal(); }});
+textOk.addEventListener('click', ()=>{
+  state.placingText = {
+    text: textInput.value||'',
+    size: Math.max(8, Math.min(96, parseInt(textSize.value||18,10))),
+    color: textColor.value
   };
+  closeTextModal();
+});
 
-  // 既定値（UIは増やさず、内部で維持）
-  const defaults = {
-    pen:    { color:'#000000', widthMM:2.0 },
-    marker: { color:'#FFFF00', widthMM:6.0, opacity:0.5 }, // 透明度は固定（UI非表示）
-    eraser: { widthMM:8.0, shape:'circle' } // 形は固定（UI非表示）
-  };
+// ====== 設定（デバッグ） ======
+gearBtn.addEventListener('click', ()=>{ gearModal.hidden=false; debugCheck.checked = !debugBox.hidden; });
+gearClose.addEventListener('click', ()=>{ gearModal.hidden=true; });
+debugCheck.addEventListener('change', ()=>{ debugBox.hidden = !debugCheck.checked; });
+if(DEBUG_URL){ debugBox.hidden = false; }
 
-  const state = {
-    tool:'pen',
-    scale:1, tx:0, ty:0,
-    drawing:false, currentStroke:null, pointerId:null,
-    strokes:[], redoStack:[],
-    placingText:null,
-    settings: JSON.parse(JSON.stringify(defaults)),
-    eraserCursor:{visible:false, cx:0, cy:0},
-    _fitted:false,
-    _lastWrapSize:{w:0,h:0}
-  };
+// ====== 入力・ジェスチャ ======
+let activePointers = new Map();
+let pinchRef = null;
 
-  // 参照
-  const tools = $$('#sidebar .tool');
-  const sidebar = $('#sidebar');
-  const sidebarToggle = $('#sidebarToggle');
-  const topToggleBtn = $('#toggleSidebarBtn');
-  const widthLabelTitle = $('#widthLabelTitle');
-  const widthLabel = $('#widthLabel');
-  const widthRange = $('#widthRange');
-  const colorSection = $('#colorSection');
-  const colorPick = $('#colorPick');
-  const palmCheck = $('#palmCheck');
-  const undoBtn = $('#undoBtn'), redoBtn = $('#redoBtn');
-  const debugBox = $('#debug');
-  const gearBtn = $('#gearBtn'), gearModal = $('#gearModal'), gearClose = $('#gearClose');
-  const debugCheck = $('#debugCheck');
+canvas.addEventListener('pointerenter', ()=>{ if(state.tool==='eraser'){ state.eraserCursor.visible = true; render(); }});
+canvas.addEventListener('pointerleave', ()=>{ state.eraserCursor.visible = false; render(); });
 
-  // --- Canvas sizing（表示後に必ずフィット） ---
-  function fitCanvas(force=false){
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
-    const w = wrap.clientWidth, h = wrap.clientHeight;
-    if(!force && w===state._lastWrapSize.w && h===state._lastWrapSize.h) return;
-    state._lastWrapSize = {w,h};
-    if(w===0 || h===0) return; // 非表示時はスキップ→Observerで後続fit
+canvas.addEventListener('pointerdown', (e)=>{
+  e.preventDefault();
+  canvas.setPointerCapture(e.pointerId);
+  activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
 
-    canvas.style.width = w+'px'; canvas.style.height = h+'px';
-    canvas.width = Math.floor(w * dpr);
-    canvas.height = Math.floor(h * dpr);
-    ctx.setTransform(dpr,0,0,dpr,0,0);
-
-    // 初期フィット（UI変更なし：フルキャンバス）
-    if(!state._fitted){
-      state.scale = 1;
-      state.tx = 0; state.ty = 0;
-      state._fitted = true;
-    }
-    render();
-  }
-  // 初期 & ページ可視化時
-  window.addEventListener('DOMContentLoaded', ()=>setTimeout(()=>fitCanvas(true),0));
-  window.addEventListener('load', ()=>fitCanvas(true));
-  window.addEventListener('pageshow', ()=>fitCanvas(true));
-  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') fitCanvas(true); });
-  window.addEventListener('resize', ()=>fitCanvas(true), {passive:true});
-
-  // 表示切替対策：wrapサイズ監視
-  const ro = new ResizeObserver(()=>fitCanvas(true));
-  ro.observe(wrap);
-
-  // --- Sidebar toggle（原状） ---
-  function toggleSidebar(){
-    sidebar.classList.toggle('collapsed');
-    sidebarToggle.textContent = sidebar.classList.contains('collapsed') ? '▶' : '◀';
-    fitCanvas(true); // 幅が変わるので再フィット
-  }
-  sidebarToggle.addEventListener('pointerdown', e=>{e.preventDefault(); toggleSidebar();});
-  topToggleBtn.addEventListener('click', toggleSidebar);
-
-  // --- Tool & UI（増やさない） ---
-  function applyToolUI(){
-    const t = state.tool;
-    tools.forEach(b=>b.classList.toggle('active', b.dataset.tool===t));
-    if(t==='pen'){
-      widthLabelTitle.textContent = '太さ（ペン）';
-      widthRange.value = state.settings.pen.widthMM;
-      colorPick.value = state.settings.pen.color;
-      colorSection.hidden=false;
-    }else if(t==='marker'){
-      widthLabelTitle.textContent = '太さ（マーカー）';
-      widthRange.value = state.settings.marker.widthMM;
-      colorPick.value = state.settings.marker.color;
-      colorSection.hidden=false;
-    }else if(t==='eraser'){
-      widthLabelTitle.textContent = '消しゴムの大きさ';
-      widthRange.value = state.settings.eraser.widthMM;
-      colorSection.hidden=true; // 消しゴムは色無し
-    }else{ // hand
-      widthLabelTitle.textContent = '太さ';
-      colorSection.hidden=true;
-    }
-    updateWidthLabel();
-  }
-  function setTool(t){ state.tool=t; applyToolUI(); }
-  tools.forEach(b=>b.addEventListener('click', ()=>setTool(b.dataset.tool)));
-  setTool('pen');
-
-  function updateWidthLabel(){
-    const mm = parseFloat(widthRange.value);
-    const pt = mm * 2.83465;
-    widthLabel.textContent = `(${mm.toFixed(1)} mm / ${pt.toFixed(1)} pt)`;
-    if(state.tool==='pen') state.settings.pen.widthMM = mm;
-    else if(state.tool==='marker') state.settings.marker.widthMM = mm;
-    else if(state.tool==='eraser') state.settings.eraser.widthMM = mm;
-    render();
-  }
-  widthRange.addEventListener('input', updateWidthLabel);
-  colorPick.addEventListener('input', ()=>{
-    if(state.tool==='pen') state.settings.pen.color = colorPick.value;
-    else if(state.tool==='marker') state.settings.marker.color = colorPick.value;
-  });
-
-  // --- Undo/Redo ---
-  function commitStroke(){
-    if(state.currentStroke){
-      state.strokes.push(state.currentStroke);
-      state.currentStroke = null;
-      state.redoStack.length = 0;
-    }
-    render();
-  }
-  undoBtn.addEventListener('click', ()=>{
-    if(state.strokes.length){ state.redoStack.push(state.strokes.pop()); render(); }
-  });
-  redoBtn.addEventListener('click', ()=>{
-    if(state.redoStack.length){ state.strokes.push(state.redoStack.pop()); render(); }
-  });
-  window.addEventListener('keydown', (e)=>{
-    if(e.ctrlKey && e.key.toLowerCase()==='z'){ e.preventDefault(); e.shiftKey ? redoBtn.click() : undoBtn.click(); }
-  });
-
-  // --- Text dialog ---
-  const textModal = $('#textModal'), textInput = $('#textInput');
-  const textOk = $('#textOk'), textCancel = $('#textCancel');
-  const textSize = $('#textSize'), textColor = $('#textColor');
-  $('#textBtn').addEventListener('click', ()=>{ textModal.hidden=false; textInput.focus(); });
-  function closeTextModal(){ textModal.hidden=true; }
-  textCancel.addEventListener('click', closeTextModal);
-  window.addEventListener('keydown', (e)=>{ if(!textModal.hidden && e.key==='Escape'){ closeTextModal(); }});
-  textOk.addEventListener('click', ()=>{
-    state.placingText = {
-      text: textInput.value||'',
-      size: Math.max(8, Math.min(96, parseInt(textSize.value||18,10))),
-      color: textColor.value
-    };
-    closeTextModal();
-  });
-
-  // --- Settings (debug) ---
-  const gearBtn = $('#gearBtn'), gearModal = $('#gearModal'), gearClose = $('#gearClose');
-  const debugCheck = $('#debugCheck'), debugBox = $('#debug');
-  gearBtn.addEventListener('click', ()=>{ gearModal.hidden=false; debugCheck.checked = !debugBox.hidden; });
-  gearClose.addEventListener('click', ()=>{ gearModal.hidden=true; });
-  debugCheck.addEventListener('change', ()=>{ debugBox.hidden = !debugCheck.checked; });
-  if(DEBUG_URL){ debugBox.hidden = false; }
-
-  // --- Input & gestures ---
-  let activePointers = new Map();
-  let pinchRef = null;
-
-  canvas.addEventListener('pointerenter', ()=>{ if(state.tool==='eraser'){ state.eraserCursor.visible = true; render(); }});
-  canvas.addEventListener('pointerleave', ()=>{ state.eraserCursor.visible = false; render(); });
-
-  canvas.addEventListener('pointerdown', (e)=>{
-    e.preventDefault();
-    canvas.setPointerCapture(e.pointerId);
-    activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
-
-    // テキスト配置
-    if(state.placingText){
-      const w = support.worldFromClient(e.clientX, e.clientY);
-      state.strokes.push({ kind:'text', x:w.x, y:w.y, text:state.placingText.text, size:state.placingText.size, color:state.placingText.color, font:'"Noto Sans JP", sans-serif' });
-      state.placingText = null; render(); return;
-    }
-
-    // ピンチ初期化
-    if(e.pointerType==='touch' && activePointers.size===2){
-      const pts = Array.from(activePointers.values());
-      pinchRef = {
-        d: Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y),
-        mid:{ x:(pts[0].x+pts[1].x)/2, y:(pts[0].y+pts[1].y)/2 },
-        scale0: state.scale, tx0: state.tx, ty0: state.ty
-      };
-      return;
-    }
-
-    // Hand（パン）
-    if(state.tool==='hand'){
-      state.drawing = true; state.pointerId = e.pointerId;
-      state._last = {x:e.clientX, y:e.clientY}; return;
-    }
-
-    // Palm rejection
-    if(palmCheck.checked && (state.tool==='pen' || state.tool==='marker') && e.pointerType==='touch'){ return; }
-
-    // 描画開始
+  // テキスト配置
+  if(state.placingText){
     const w = support.worldFromClient(e.clientX, e.clientY);
-    if(state.tool==='pen' || state.tool==='marker'){
-      const set = state.settings[state.tool];
-      state.currentStroke = {
-        kind: state.tool,
-        color: set.color,
-        widthMM: set.widthMM,
-        opacity: (state.tool==='marker' ? set.opacity : 1),
-        pts: [{x:w.x, y:w.y, p:e.pressure||1, t:performance.now(), tiltX:e.tiltX||0, tiltY:e.tiltY||0}]
-      };
-      state.drawing = true; state.pointerId = e.pointerId; render(); return;
-    }
-    if(state.tool==='eraser'){
-      const set = state.settings.eraser;
-      state.currentStroke = {
-        kind: 'eraser',
-        widthMM: set.widthMM,
-        shape: set.shape,
-        pts: [{x:w.x, y:w.y, p:1, t:performance.now()}]
-      };
-      state.drawing = true; state.pointerId = e.pointerId; render(); return;
-    }
-  }, {passive:false});
-
-  canvas.addEventListener('pointermove', (e)=>{
-    if(!activePointers.has(e.pointerId)) return;
-    activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
-
-    // 消しゴムカーソル（画面座標ガイド）
-    if(state.tool==='eraser'){
-      const c = support.clientFromEvent(e);
-      state.eraserCursor.visible = true; state.eraserCursor.cx = c.x; state.eraserCursor.cy = c.y;
-    }
-
-    // ピンチズーム
-    if(pinchRef && activePointers.size===2){
-      const pts = Array.from(activePointers.values());
-      const d = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
-      const s = Math.max(0.25, Math.min(6, pinchRef.scale0 * (d / (pinchRef.d||1))));
-      const before = support.worldFromClient(pinchRef.mid.x, pinchRef.mid.y);
-      state.scale = s;
-      const after = support.worldFromClient(pinchRef.mid.x, pinchRef.mid.y);
-      state.tx += ((after.x - before.x) * state.scale);
-      state.ty += ((after.y - before.y) * state.scale);
-      render(); return;
-    }
-
-    if(state.tool==='hand' && state.drawing && state.pointerId===e.pointerId){
-      const dx = e.clientX - state._last.x;
-      const dy = e.clientY - state._last.y;
-      state.tx += dx; state.ty += dy;
-      state._last = {x:e.clientX, y:e.clientY};
-      render(); return;
-    }
-
-    if(state.drawing && state.pointerId===e.pointerId && state.currentStroke){
-      if(palmCheck.checked && (state.tool==='pen' || state.tool==='marker') && e.pointerType==='touch'){ return; }
-      const w = support.worldFromClient(e.clientX, e.clientY);
-      const p = e.pressure || 1;
-      state.currentStroke.pts.push({x:w.x, y:w.y, p, t:performance.now(), tiltX:e.tiltX||0, tiltY:e.tiltY||0});
-      render();
-    }
-
-    debug(`tool:${state.tool} type:${e.pointerType} p:${(e.pressure||1).toFixed(2)} scale:${state.scale.toFixed(2)}`);
-  }, {passive:false});
-
-  function endPointer(e){
-    activePointers.delete(e.pointerId);
-    if(pinchRef && activePointers.size<2){ pinchRef=null; }
-    if(state.drawing && state.pointerId===e.pointerId){
-      state.drawing=false; state.pointerId=null; commitStroke();
-    }
+    state.strokes.push({ kind:'text', x:w.x, y:w.y, text:state.placingText.text, size:state.placingText.size, color:state.placingText.color, font:'"Noto Sans JP", sans-serif' });
+    state.placingText = null; render(); return;
   }
-  canvas.addEventListener('pointerup', endPointer, {passive:true});
-  canvas.addEventListener('pointercancel', endPointer, {passive:true});
-  canvas.addEventListener('pointerout', (e)=>{ if(state.pointerId===e.pointerId && state.drawing){ endPointer(e); } }, {passive:true});
 
-  // ホイール拡大縮小（Ctrl+ホイール）
-  canvas.addEventListener('wheel', (e)=>{
-    if(!e.ctrlKey) return; e.preventDefault();
-    const before = support.worldFromClient(e.clientX, e.clientY);
-    const s = Math.max(.25, Math.min(6, state.scale * (e.deltaY<0 ? 1.1 : 0.9)));
+  // ピンチ初期化
+  if(e.pointerType==='touch' && activePointers.size===2){
+    const pts = Array.from(activePointers.values());
+    pinchRef = {
+      d: Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y),
+      mid:{ x:(pts[0].x+pts[1].x)/2, y:(pts[0].y+pts[1].y)/2 },
+      scale0: state.scale, tx0: state.tx, ty0: state.ty
+    };
+    return;
+  }
+
+  // Hand（パン）
+  if(state.tool==='hand'){
+    state.drawing = true; state.pointerId = e.pointerId;
+    state._last = {x:e.clientX, y:e.clientY}; return;
+  }
+
+  // Palm rejection
+  if(palmCheck.checked && (state.tool==='pen' || state.tool==='marker') && e.pointerType==='touch'){ return; }
+
+  // 描画開始
+  const w = support.worldFromClient(e.clientX, e.clientY);
+  if(state.tool==='pen' || state.tool==='marker'){
+    const set = state.settings[state.tool];
+    state.currentStroke = {
+      kind: state.tool,
+      color: set.color,
+      widthMM: set.widthMM,
+      opacity: (state.tool==='marker' ? set.opacity : 1),
+      pts: [{x:w.x, y:w.y, p:e.pressure||1, t:performance.now(), tiltX:e.tiltX||0, tiltY:e.tiltY||0}]
+    };
+    state.drawing = true; state.pointerId = e.pointerId; render(); return;
+  }
+  if(state.tool==='eraser'){
+    const set = state.settings.eraser;
+    state.currentStroke = {
+      kind: 'eraser',
+      widthMM: set.widthMM,
+      pts: [{x:w.x, y:w.y, p:1, t:performance.now()}]
+    };
+    state.drawing = true; state.pointerId = e.pointerId; render(); return;
+  }
+}, {passive:false});
+
+canvas.addEventListener('pointermove', (e)=>{
+  if(!activePointers.has(e.pointerId)) return;
+  activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+
+  // 消しゴムカーソル（画面座標ガイド）
+  if(state.tool==='eraser'){
+    const c = support.clientFromEvent(e);
+    state.eraserCursor.visible = true; state.eraserCursor.cx = c.x; state.eraserCursor.cy = c.y;
+  }
+
+  // ピンチズーム
+  if(pinchRef && activePointers.size===2){
+    const pts = Array.from(activePointers.values());
+    const d = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+    const s = Math.max(0.25, Math.min(6, pinchRef.scale0 * (d / (pinchRef.d||1))));
+    const before = support.worldFromClient(pinchRef.mid.x, pinchRef.mid.y);
     state.scale = s;
-    const after = support.worldFromClient(e.clientX, e.clientY);
+    const after = support.worldFromClient(pinchRef.mid.x, pinchRef.mid.y);
     state.tx += ((after.x - before.x) * state.scale);
     state.ty += ((after.y - before.y) * state.scale);
+    render(); return;
+  }
+
+  if(state.tool==='hand' && state.drawing && state.pointerId===e.pointerId){
+    const dx = e.clientX - state._last.x;
+    const dy = e.clientY - state._last.y;
+    state.tx += dx; state.ty += dy;
+    state._last = {x:e.clientX, y:e.clientY};
+    render(); return;
+  }
+
+  if(state.drawing && state.pointerId===e.pointerId && state.currentStroke){
+    if(palmCheck.checked && (state.tool==='pen' || state.tool==='marker') && e.pointerType==='touch'){ return; }
+    const w = support.worldFromClient(e.clientX, e.clientY);
+    const p = e.pressure || 1;
+    state.currentStroke.pts.push({x:w.x, y:w.y, p, t:performance.now(), tiltX:e.tiltX||0, tiltY:e.tiltY||0});
     render();
-  }, {passive:false});
+  }
 
-  // --- Rendering（背景は毎回不透明で塗り潰し＝透け防止） ---
-  function render(){
-    const w = wrap.clientWidth, h = wrap.clientHeight;
+  debug(`tool:${state.tool} type:${e.pointerType} p:${(e.pressure||1).toFixed(2)} scale:${state.scale.toFixed(2)}`);
+}, {passive:false});
+
+function endPointer(e){
+  activePointers.delete(e.pointerId);
+  if(pinchRef && activePointers.size<2){ pinchRef=null; }
+  if(state.drawing && state.pointerId===e.pointerId){
+    state.drawing=false; state.pointerId=null; commitStroke();
+  }
+}
+canvas.addEventListener('pointerup', endPointer, {passive:true});
+canvas.addEventListener('pointercancel', endPointer, {passive:true});
+canvas.addEventListener('pointerout', (e)=>{ if(state.pointerId===e.pointerId && state.drawing){ endPointer(e); } }, {passive:true});
+
+// ホイール拡大縮小（Ctrl+ホイール）
+canvas.addEventListener('wheel', (e)=>{
+  if(!e.ctrlKey) return; e.preventDefault();
+  const before = support.worldFromClient(e.clientX, e.clientY);
+  const s = Math.max(.25, Math.min(6, state.scale * (e.deltaY<0 ? 1.1 : 0.9)));
+  state.scale = s;
+  const after = support.worldFromClient(e.clientX, e.clientY);
+  state.tx += ((after.x - before.x) * state.scale);
+  state.ty += ((after.y - before.y) * state.scale);
+  render();
+}, {passive:false});
+
+// ====== 描画 ======
+function render(){
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  ctx.save();
+  // 透け防止：不透明背景で全面塗り
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle = '#0c0e12';
+  ctx.fillRect(0,0,w,h);
+
+  ctx.translate(state.tx, state.ty);
+  ctx.scale(state.scale, state.scale);
+
+  for(const s of state.strokes){ drawStroke(s); }
+  if(state.currentStroke) drawStroke(state.currentStroke);
+
+  ctx.restore();
+
+  // 消しゴムサイズガイド（画面座標）
+  if(state.tool==='eraser' && state.eraserCursor.visible){
     ctx.save();
-    ctx.clearRect(0,0,w,h);
-    ctx.fillStyle = '#0c0e12'; // 不透明背景で透け防止
-    ctx.fillRect(0,0,w,h);
-
-    ctx.translate(state.tx, state.ty);
-    ctx.scale(state.scale, state.scale);
-
-    for(const s of state.strokes){ drawStroke(s); }
-    if(state.currentStroke) drawStroke(state.currentStroke);
-
+    ctx.setTransform(1,0,0,1,0,0);
+    const rWorld = (state.settings.eraser.widthMM * support.mm2px)/2;
+    const rScreen = rWorld * state.scale;
+    const x = state.eraserCursor.cx, y = state.eraserCursor.cy;
+    ctx.globalAlpha = 0.95; ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    ctx.beginPath(); ctx.arc(x, y, rScreen, 0, Math.PI*2); ctx.stroke();
+    const label = `${state.settings.eraser.widthMM.toFixed(1)} mm`;
+    ctx.font = '12px ui-monospace,monospace'; ctx.textBaseline='top';
+    const tw = ctx.measureText(label).width, pad=4;
+    ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(x+8, y+8, tw+pad*2, 18);
+    ctx.fillStyle='#fff'; ctx.fillText(label, x+8+pad, y+9);
     ctx.restore();
+  }
+}
 
-    // 消しゴムガイド
-    if(state.tool==='eraser' && state.eraserCursor.visible){
-      ctx.save();
-      ctx.setTransform(1,0,0,1,0,0);
-      const rWorld = (state.settings.eraser.widthMM * support.mm2px)/2;
-      const rScreen = rWorld * state.scale;
-      const x = state.eraserCursor.cx, y = state.eraserCursor.cy;
-      ctx.globalAlpha = 0.95; ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,255,255,0.95)';
-      ctx.beginPath(); ctx.arc(x, y, rScreen, 0, Math.PI*2); ctx.stroke();
-      const label = `${state.settings.eraser.widthMM.toFixed(1)} mm`;
-      ctx.font = '12px ui-monospace,monospace'; ctx.textBaseline='top';
-      const tw = ctx.measureText(label).width, pad=4;
-      ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(x+8, y+8, tw+pad*2, 18);
-      ctx.fillStyle='#fff'; ctx.fillText(label, x+8+pad, y+9);
-      ctx.restore();
-    }
+function drawStroke(s){
+  if(s.kind==='text'){
+    ctx.save();
+    ctx.fillStyle = s.color; ctx.font = `${s.size}px ${s.font||'sans-serif'}`; ctx.textBaseline='alphabetic';
+    ctx.fillText(s.text, s.x, s.y);
+    ctx.restore(); return;
+  }
+  const basePx = s.widthMM * support.mm2px;
+
+  if(s.kind==='eraser'){
+    ctx.globalCompositeOperation='destination-out';
+    ctx.strokeStyle='rgba(0,0,0,1)';
+    ctx.lineJoin='round'; ctx.lineCap='round';
+    ctx.globalAlpha = 1;
+  }else{
+    ctx.globalCompositeOperation='source-over';
+    ctx.strokeStyle = s.color;
+    ctx.lineJoin='round'; ctx.lineCap='round';
+    ctx.globalAlpha = (s.kind==='marker') ? (s.opacity ?? 0.5) : 1;
   }
 
-  function drawStroke(s){
-    if(s.kind==='text'){
-      ctx.save();
-      ctx.fillStyle = s.color; ctx.font = `${s.size}px ${s.font||'sans-serif'}`; ctx.textBaseline='alphabetic';
-      ctx.fillText(s.text, s.x, s.y);
-      ctx.restore(); return;
-    }
-    const basePx = s.widthMM * support.mm2px;
-
-    if(s.kind==='eraser'){
-      ctx.globalCompositeOperation='destination-out';
-      ctx.strokeStyle='rgba(0,0,0,1)';
-      ctx.lineJoin='round'; ctx.lineCap='round';
-      ctx.globalAlpha = 1;
-    }else{
-      ctx.globalCompositeOperation='source-over';
-      ctx.strokeStyle = s.color;
-      ctx.lineJoin='round'; ctx.lineCap='round';
-      ctx.globalAlpha = (s.kind==='marker') ? (s.opacity ?? 0.5) : 1;
-    }
-
-    ctx.beginPath();
-    let last = null;
-    for(const p of s.pts){
-      const w = basePx * (p.p || 1);
-      ctx.lineWidth = Math.max(0.5, w);
-      if(!last){ ctx.moveTo(p.x, p.y); last = p; continue; }
-      const mx = (last.x + p.x) * 0.5;
-      const my = (last.y + p.y) * 0.5;
-      ctx.quadraticCurveTo(last.x, last.y, mx, my);
-      last = p;
-    }
-    if(last) ctx.lineTo(last.x, last.y);
-    ctx.stroke();
-
-    ctx.globalAlpha = 1; ctx.globalCompositeOperation='source-over';
+  ctx.beginPath();
+  let last = null;
+  for(const p of s.pts){
+    const w = basePx * (p.p || 1); // 筆圧で太さ変化（マーカーも統一）
+    ctx.lineWidth = Math.max(0.5, w);
+    if(!last){ ctx.moveTo(p.x, p.y); last = p; continue; }
+    const mx = (last.x + p.x) * 0.5;
+    const my = (last.y + p.y) * 0.5;
+    ctx.quadraticCurveTo(last.x, last.y, mx, my);
+    last = p;
   }
+  if(last) ctx.lineTo(last.x, last.y);
+  ctx.stroke();
 
-  // --- Debug ---
-  function debug(msg){
-    if(debugBox.hidden) return;
-    debugBox.textContent = [
-      msg,
-      `scale=${state.scale.toFixed(2)} tx=${state.tx.toFixed(1)} ty=${state.ty.toFixed(1)}`,
-      `strokes=${state.strokes.length}${state.currentStroke?' (+drawing)':''}`
-    ].join('\n');
-  }
-  if(DEBUG_URL){ debugBox.hidden = false; }
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation='source-over';
+}
+
+// ====== Debug ======
+function debug(msg){
+  if(debugBox.hidden) return;
+  debugBox.textContent = [
+    msg,
+    `scale=${state.scale.toFixed(2)} tx=${state.tx.toFixed(1)} ty=${state.ty.toFixed(1)}`,
+    `strokes=${state.strokes.length}${state.currentStroke?' (+drawing)':''}`
+  ].join('\n');
+}
+if(DEBUG_URL){ debugBox.hidden = false; }
+
 })();
 </script>
 </body>
