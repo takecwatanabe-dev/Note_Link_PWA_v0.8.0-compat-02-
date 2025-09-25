@@ -5,10 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>NOTE LINK — v0.8.0 / B-REL6-HF1</title>
 <style>
-  :root{
-    --a4w: 794px;  /* 210mm ≒ 794px @96dpi */
-    --a4h:1123px;  /* 297mm ≒1123px @96dpi */
-  }
+  :root{ --a4w:794px; --a4h:1123px; }
   html,body{height:100%}
   body{margin:0;background:#1b1b1b;color:#f4f4f4;font-family:system-ui,"Noto Sans JP",sans-serif}
   .topbar{height:44px;display:flex;align-items:center;gap:12px;padding:0 14px;background:#111;border-bottom:1px solid #2a2a2a}
@@ -24,7 +21,7 @@
   #note{position:absolute;left:0;top:0;width:100%;height:100%}
   #overlay{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
 
-  /* —— 消しゴム設定ダイアログ（内部UIのみ追加） —— */
+  /* 消しゴム設定ダイアログ（内部UIのみ追加） */
   dialog#eraserDialog{
     border:none;border-radius:12px;padding:0;max-width:360px;background:#121212;color:#eee;
     box-shadow:0 14px 60px rgba(0,0,0,.6);width:min(92vw,360px)
@@ -66,7 +63,6 @@
     </main>
   </div>
 
-  <!-- 既存UIは変えず、設定はダイアログ内部のみ追加 -->
   <dialog id="eraserDialog">
     <div class="dlg-hd">消しゴム 設定</div>
     <div class="dlg-bd">
@@ -95,9 +91,7 @@
       <div class="mmnote" id="sizeInfo">現在：24 px（約 6.35 mm）</div>
       <div class="mmnote">ショートカット：形状 <b>R</b> ／ サイズ <b>[</b> <b>]</b> ／ ダイアログ <b>Ctrl+E</b></div>
     </div>
-    <div class="dlg-ft">
-      <button id="dlgClose">閉じる</button>
-    </div>
+    <div class="dlg-ft"><button id="dlgClose">閉じる</button></div>
   </dialog>
 
 <script>
@@ -115,169 +109,187 @@
   const stage = document.getElementById('stage');
   const note  = document.getElementById('note');
   const ov    = document.getElementById('overlay');
-  const dpr   = Math.max(1, window.devicePixelRatio || 1);
+  const ctx   = note.getContext('2d');
+  const octx  = ov.getContext('2d');
 
+  // 入力が拾えない環境対策：複数ターゲット＋passive:false
+  const LISTENER_OPT = { passive:false };
+
+  // DPI
+  const DPR = () => Math.max(1, window.devicePixelRatio || 1);
+
+  // 実解像度同期（2段階のrAFでlayout完了後に確定）
+  function syncSize() {
+    const fix = () => {
+      const r = stage.getBoundingClientRect();
+      const dpr = DPR();
+      const w = Math.max(2, Math.floor(r.width  * dpr));
+      const h = Math.max(2, Math.floor(r.height * dpr));
+      if (note.width !== w)  note.width  = w;
+      if (note.height !== h) note.height = h;
+      if (ov.width !== w)    ov.width    = w;
+      if (ov.height !== h)   ov.height   = h;
+      note.style.width  = r.width + 'px';
+      note.style.height = r.height + 'px';
+      ov.style.width    = r.width + 'px';
+      ov.style.height   = r.height + 'px';
+      ctx.lineCap = ctx.lineJoin = 'round';
+    };
+    requestAnimationFrame(()=>requestAnimationFrame(fix));
+  }
+  syncSize();
+  addEventListener('resize', syncSize);
+
+  // 状態
   const state = {
-    tool: 'pen', // 'pen'|'marker'|'eraser'
+    tool: 'pen',
     drawing:false,
-    startX:0, startY:0,
-    lastX:0, lastY:0,
-    straight:false
+    startX:0,startY:0,lastX:0,lastY:0,
+    straight:false,
+    pointerId:null
   };
 
-  // —— 色・太さ
+  // 設定
   let penColor    = DEFAULTS.penColor;
   let markerColor = DEFAULTS.markerColor;
   let markerAlpha = DEFAULTS.markerAlpha;
   let penWidth    = DEFAULTS.penWidth;
   let markerWidth = DEFAULTS.markerWidth;
+  const eraser    = { ...DEFAULTS.eraser };
 
-  // —— 消しゴム
-  const eraser = { ...DEFAULTS.eraser };
-
-  // —— 2Dコンテキスト
-  const ctx  = note.getContext('2d');
-  const octx = ov.getContext('2d');
-
-  // —— 実サイズ確定（初回はlayout完了後に1フレーム遅延）
-  function resizeCanvas() {
-    const r = stage.getBoundingClientRect();
-    const w = Math.max(2, Math.floor(r.width  * dpr));
-    const h = Math.max(2, Math.floor(r.height * dpr));
-    note.width = w; note.height = h;
-    ov.width   = w; ov.height   = h;
-    // CSSサイズ（見た目）はstageと同じに保つ
-    note.style.width = r.width + 'px';
-    note.style.height= r.height + 'px';
-    ov  .style.width = r.width + 'px';
-    ov  .style.height= r.height + 'px';
-    // 描画スタイル（毎回統一）
-    ctx.lineCap = ctx.lineJoin = 'round';
-  }
-  requestAnimationFrame(()=>{ resizeCanvas(); });
-  addEventListener('resize', ()=>{ requestAnimationFrame(resizeCanvas); });
-
-  // —— 座標変換（CSS→キャンバス）
-  function pos(e){
+  // 位置計算
+  function posFromClient(clientX, clientY){
     const r = note.getBoundingClientRect();
-    return {
-      x: (e.clientX - r.left) * dpr,
-      y: (e.clientY - r.top)  * dpr
-    };
+    const dpr = DPR();
+    return { x:(clientX - r.left)*dpr, y:(clientY - r.top)*dpr };
   }
 
-  function pxToMm(px){ return px * 25.4 / 96; }
-
-  function style(tool){
+  // スタイル適用
+  function useStyle(tool){
     if(tool==='pen'){
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = 1.0;
-      ctx.strokeStyle = penColor;
-      ctx.lineWidth   = penWidth * dpr;
+      ctx.globalCompositeOperation='source-over';
+      ctx.globalAlpha=1.0;
+      ctx.strokeStyle=penColor;
+      ctx.lineWidth=penWidth*DPR();
     }else if(tool==='marker'){
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = markerAlpha;            // ★直線/曲線 共通
-      ctx.strokeStyle = markerColor;
-      ctx.lineWidth   = markerWidth * dpr;
+      ctx.globalCompositeOperation='source-over';
+      ctx.globalAlpha=markerAlpha;  // 直線/曲線 統一
+      ctx.strokeStyle=markerColor;
+      ctx.lineWidth=markerWidth*DPR();
     }else{
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.globalAlpha = 1.0;
-      ctx.lineWidth   = eraser.size * dpr;
+      ctx.globalCompositeOperation='destination-out';
+      ctx.globalAlpha=1.0;
+      ctx.lineWidth=eraser.size*DPR();
     }
-    ctx.lineCap = ctx.lineJoin = 'round';
   }
 
+  // 描画基本
   function begin(x,y){
-    state.drawing = true;
-    state.startX = state.lastX = x;
-    state.startY = state.lastY = y;
+    state.drawing=true; state.startX=state.lastX=x; state.startY=state.lastY=y;
     ctx.beginPath(); ctx.moveTo(x,y);
   }
   function drag(x,y,straight){
     ctx.beginPath();
-    if(straight){ ctx.moveTo(state.startX, state.startY); }
-    else        { ctx.moveTo(state.lastX, state.lastY); }
-    ctx.lineTo(x,y);
-    ctx.stroke();
-    state.lastX = x; state.lastY = y;
+    if(straight){ ctx.moveTo(state.startX,state.startY); }
+    else{ ctx.moveTo(state.lastX,state.lastY); }
+    ctx.lineTo(x,y); ctx.stroke();
+    state.lastX=x; state.lastY=y;
   }
-  function end(){ state.drawing = false; }
+  function end(){ state.drawing=false; }
 
-  // —— ガイド
+  // ガイド
   function guide(x,y){
     octx.clearRect(0,0,ov.width,ov.height);
-    if(state.tool!=='eraser' || !eraser.guide) return;
-    const s = eraser.size * dpr;
+    if(state.tool!=='eraser'||!eraser.guide) return;
+    const s = eraser.size*DPR();
     octx.save();
-    octx.strokeStyle = 'rgba(0,0,0,.35)';
-    octx.lineWidth = 2 * dpr;
-    octx.setLineDash([6*dpr,6*dpr]);
-    if(eraser.shape==='circle'){
-      octx.beginPath(); octx.arc(x,y,s/2,0,Math.PI*2); octx.stroke();
-    }else{
-      octx.strokeRect(x-s/2,y-s/2,s,s);
-    }
+    octx.strokeStyle='rgba(0,0,0,.35)'; octx.lineWidth=2*DPR(); octx.setLineDash([6*DPR(),6*DPR()]);
+    if(eraser.shape==='circle'){ octx.beginPath(); octx.arc(x,y,s/2,0,Math.PI*2); octx.stroke(); }
+    else{ octx.strokeRect(x-s/2,y-s/2,s,s); }
     octx.restore();
   }
 
-  // —— ポインタ
-  note.addEventListener('pointerdown', (e)=>{
+  // —— Pointer
+  function onPointerDown(e){
+    e.preventDefault();
+    state.pointerId = e.pointerId ?? null;
     note.setPointerCapture?.(e.pointerId);
-    const {x,y} = pos(e);
+    const {x,y} = posFromClient(e.clientX, e.clientY);
     if(state.tool==='eraser'){
-      style('eraser');
-      const s = eraser.size * dpr;
+      useStyle('eraser');
+      const s = eraser.size*DPR();
       if(eraser.shape==='circle'){ ctx.beginPath(); ctx.arc(x,y,s/2,0,Math.PI*2); ctx.fill(); }
       else{ ctx.fillRect(x-s/2,y-s/2,s,s); }
-      guide(x,y);
-      return;
+      guide(x,y); return;
     }
-    style(state.tool); begin(x,y); guide(x,y);
-  });
-
-  note.addEventListener('pointermove', (e)=>{
-    const {x,y} = pos(e);
+    useStyle(state.tool); begin(x,y); guide(x,y);
+  }
+  function onPointerMove(e){
+    if(e.type==='pointermove' && e.pointerId && state.pointerId && e.pointerId!==state.pointerId) return;
+    const {x,y} = posFromClient(e.clientX, e.clientY);
     if(state.tool==='eraser'){
       guide(x,y);
       if(e.buttons & 1){
-        style('eraser');
-        const s = eraser.size * dpr;
+        useStyle('eraser');
+        const s = eraser.size*DPR();
         if(eraser.shape==='circle'){ ctx.beginPath(); ctx.arc(x,y,s/2,0,Math.PI*2); ctx.fill(); }
         else{ ctx.fillRect(x-s/2,y-s/2,s,s); }
       }
       return;
     }
     if(!state.drawing){ guide(x,y); return; }
-    style(state.tool); drag(x,y, e.shiftKey || state.straight); guide(x,y);
-  });
-
-  const endAll = ()=>{
+    useStyle(state.tool); drag(x,y, e.shiftKey || state.straight); guide(x,y);
+  }
+  function onPointerUp(){
     if(state.drawing) end();
     octx.clearRect(0,0,ov.width,ov.height);
-    try{ note.releasePointerCapture?.(PointerEvent?.pointerId); }catch(_){}
-  };
-  note.addEventListener('pointerup', endAll);
-  note.addEventListener('pointercancel', endAll);
-  note.addEventListener('pointerleave', endAll);
+    try{ if(state.pointerId!=null) note.releasePointerCapture?.(state.pointerId); }catch(_){}
+    state.pointerId=null;
+  }
 
-  // —— ホットキー（既存UIは触らず補助のみ）
-  addEventListener('keydown', (e)=>{
+  // —— Mouse / Touch フォールバック
+  function onMouseDown(e){ if(e.button!==0) return; onPointerDown({ ...e, pointerId: -1, clientX:e.clientX, clientY:e.clientY, buttons:1, preventDefault:()=>e.preventDefault() }); }
+  function onMouseMove(e){ onPointerMove({ ...e, pointerId: -1, clientX:e.clientX, clientY:e.clientY }); }
+  function onMouseUp(){ onPointerUp(); }
+  function onTouchStart(e){ const t=e.changedTouches[0]; onPointerDown({ ...e, pointerId: -2, clientX:t.clientX, clientY:t.clientY, buttons:1, preventDefault:()=>e.preventDefault() }); }
+  function onTouchMove(e){ const t=e.changedTouches[0]; onPointerMove({ ...e, pointerId: -2, clientX:t.clientX, clientY:t.clientY }); e.preventDefault(); }
+  function onTouchEnd(){ onPointerUp(); }
+
+  // 多重バインド（取りこぼし防止）
+  [note, stage, document].forEach(el=>{
+    el.addEventListener('pointerdown', onPointerDown, LISTENER_OPT);
+    el.addEventListener('pointermove', onPointerMove, LISTENER_OPT);
+    el.addEventListener('pointerup',   onPointerUp,   LISTENER_OPT);
+  });
+  // フォールバック
+  [note, stage, document].forEach(el=>{
+    el.addEventListener('mousedown', onMouseDown, LISTENER_OPT);
+    el.addEventListener('mousemove', onMouseMove, LISTENER_OPT);
+    el.addEventListener('mouseup',   onMouseUp,   LISTENER_OPT);
+    el.addEventListener('touchstart',onTouchStart, LISTENER_OPT);
+    el.addEventListener('touchmove', onTouchMove,  LISTENER_OPT);
+    el.addEventListener('touchend',  onTouchEnd,   LISTENER_OPT);
+  });
+
+  // Hotkeys（UIは触らず補助のみ）
+  addEventListener('keydown',(e)=>{
     if(e.ctrlKey && e.key.toLowerCase()==='e'){ e.preventDefault(); openDlg(); }
     if(e.key==='1') state.tool='pen';
     if(e.key==='2') state.tool='marker';
     if(e.key==='3') state.tool='eraser';
-    if(e.key==='Shift') state.straight = true;
-    if(e.key.toLowerCase()==='r'){ eraser.shape = eraser.shape==='circle'?'square':'circle'; syncDlg(); }
+    if(e.key==='Shift') state.straight=true;
+    if(e.key.toLowerCase()==='r'){ eraser.shape=eraser.shape==='circle'?'square':'circle'; syncDlg(); }
     if(e.key==='['){ eraser.size=Math.max(4,eraser.size-5); syncDlg(); }
     if(e.key===']'){ eraser.size=Math.min(200,eraser.size+5); syncDlg(); }
   });
-  addEventListener('keyup', (e)=>{ if(e.key==='Shift') state.straight=false; });
+  addEventListener('keyup',(e)=>{ if(e.key==='Shift') state.straight=false; });
 
-  // —— ダイアログ制御（内部のみ追加）
+  // 消しゴム設定ダイアログ（内部のみ）
   const dlg = document.getElementById('eraserDialog');
-  const $ = id => document.getElementById(id);
+  const $ = id=>document.getElementById(id);
   function openDlg(){ syncDlg(); dlg.showModal?.(); }
   function closeDlg(){ dlg.close?.(); }
+  function pxToMm(px){ return px * 25.4 / 96; }
   function syncDlg(){
     $('shapeCircle').setAttribute('aria-pressed', eraser.shape==='circle');
     $('shapeSquare').setAttribute('aria-pressed', eraser.shape==='square');
@@ -295,12 +307,8 @@
   $('guideOff').addEventListener('click',()=>{ eraser.guide=false; syncDlg(); });
   $('dlgClose').addEventListener('click', closeDlg);
 
-  // —— 初期ツール（既定）
-  state.tool = 'pen'; // デフォ：ペン＝黒
-  // マーカーは黄50%（直線/曲線で統一α）
-
-  // —— 最初のガイド消去
-  octx.clearRect(0,0,ov.width,ov.height);
+  // 既定：ペン（黒）、マーカー（黄50%）
+  // 直線=Shift、マーカーは直線/曲線とも同じα
 })();
 </script>
 </body>
