@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Note Link — v0.8.0-compat-02b-rel-b5</title>
+<title>Note Link — v0.8.0-compat-02b-rel-b6</title>
 <style>
 :root{--ink:#e6f1ff;--ink-dim:#9bd6e9;--bg:#0b1020;--panel:#101827;--accent:#3f78ff;--ok:#20e3c2;--muted:#2a3550;--shadow:0 10px 24px rgba(0,0,0,.45);--topbar-h:44px;--toolbar-w:56px}
 *{box-sizing:border-box}
@@ -64,7 +64,7 @@ header.topbar{position:fixed;top:0;left:0;right:0;z-index:2000;height:var(--topb
 </head>
 <body>
 <header class="topbar" id="topbar">
-  <strong id="verText">Note Link v0.8.0 / B-REL5</strong>
+  <strong id="verText">Note Link v0.8.0 / B-REL6</strong>
   <span class="sp"></span>
   <button class="btn" id="btnZoomOut">−</button>
   <button class="btn" id="btnZoomReset">100%</button>
@@ -74,7 +74,7 @@ header.topbar{position:fixed;top:0;left:0;right:0;z-index:2000;height:var(--topb
   <button class="btn" id="btnPrint">印刷</button>
   <button class="btn" id="btnPng">PNG</button>
   <button class="btn" id="btnShare">共有</button>
-  <span class="build" id="buildText">build: compat-02b-rel-b5</span>
+  <span class="build" id="buildText">build: compat-02b-rel-b6</span>
 </header>
 
 <aside class="sidebar" id="sidebar">
@@ -174,10 +174,10 @@ const cv=$('#paint'), ctx=cv.getContext('2d',{alpha:true});
 const viewport=$('#viewport'), textLayer=$('#textLayer');
 
 /* ==== version ==== */
-const APP_VERSION='v0.8.0', BUILD_ID='compat-02b-rel-b5';
+const APP_VERSION='v0.8.0', BUILD_ID='compat-02b-rel-b6';
 document.title=`Note Link — ${APP_VERSION}-${BUILD_ID}`;
 $('#buildText').textContent=`build: ${BUILD_ID}`;
-$('#verText').textContent='Note Link v0.8.0 / B-REL5';
+$('#verText').textContent='Note Link v0.8.0 / B-REL6';
 
 /* ==== layout ==== */
 function applyBars(){ const h=Math.round(topbar.getBoundingClientRect().height)||44; document.documentElement.style.setProperty('--topbar-h',h+'px');}
@@ -196,9 +196,20 @@ let color=perTool.pen.color,size=perTool.pen.size,alpha=1,cap='butt';
 let straightToggle=false,straightKey=false;
 let gridOn=false,gridStepMM=10,gridColor='#3a4f7a',gridFirst=false;
 let palmReject=true,pressureOn=true,tiltOn=true;
-const penRecent={active:false,ts:0};
 
-/* ==== tool/UI ==== */
+/* ==== history ==== */
+const hist=[], redoStack=[];
+function snapshot(){ return { url: cv.toDataURL(), texts: textLayer.innerHTML }; }
+function pushHistory(){ hist.push(snapshot()); if(hist.length>50) hist.shift(); redoStack.length=0; }
+async function restore(snap){ clear(cv); textLayer.innerHTML=snap?.texts||''; if(!snap?.url) return;
+  await new Promise(res=>{ const img=new Image(); img.onload=()=>{ ctx.drawImage(img,0,0); res(); }; img.src=snap.url; });
+}
+async function undo(){ if(!hist.length) return; const cur=snapshot(); const prev=hist.pop(); redoStack.push(cur); await restore(prev); }
+async function redo(){ const next=redoStack.pop(); if(!next) return; hist.push(snapshot()); await restore(next); }
+$('#btnUndo').addEventListener('click',()=>undo());
+$('#btnRedo').addEventListener('click',()=>redo());
+
+/* ==== panel/UI ==== */
 function saveToolState(k){const p=perTool[k]||(perTool[k]={});p.color=color;p.size=size;p.alpha=alpha;p.cap=cap;p.straight=!!straightToggle;}
 function loadToolState(k){const p=perTool[k]||{};color=p.color??color;size=p.size??size;alpha=p.alpha??alpha;cap=p.cap??cap;straightToggle=!!p.straight;}
 function setActiveTool(t){
@@ -211,7 +222,6 @@ function setActiveTool(t){
   $('#rowTextOps').style.display=(t==='keyboard')?'':'none';
   $('#rowSize').style.display=(t==='pen'||t==='marker'||t==='eraser')?'':'none';
   $('#rowPenExt').style.display=(t==='pen'||t==='marker')?'':'none';
-  syncUI();
   cv.style.cursor = (t === 'hand') ? 'grab' : 'crosshair';
 }
 $('#btnSidebarToggle').addEventListener('click',e=>{ e.stopPropagation(); sidebar.classList.toggle('collapsed');});
@@ -252,12 +262,7 @@ function onPanelChange(){color=ui.color.value;size=+ui.size.value;ui.sizeVal.tex
 Object.values(ui).forEach(el=>el.addEventListener('input',onPanelChange));
 
 /* ==== zoom ==== */
-function setZoom(z){
-  zoom = Math.max(0.5, Math.min(3, z));
-  $('#btnZoomReset').textContent = Math.round(zoom*100) + '%';
-  updateViewportTransform();
-  drawGrid(); // 既存描画は維持
-}
+function setZoom(z){ zoom = Math.max(0.5, Math.min(3, z)); $('#btnZoomReset').textContent = Math.round(zoom*100) + '%'; updateViewportTransform(); drawGrid(); }
 $('#btnZoomIn').addEventListener('click',()=>setZoom(zoom+0.1));
 $('#btnZoomOut').addEventListener('click',()=>setZoom(zoom-0.1));
 $('#btnZoomReset').addEventListener('click',()=>setZoom(1));
@@ -265,16 +270,29 @@ $('#btnZoomReset').addEventListener('click',()=>setZoom(1));
 /* ==== grid ==== */
 function clear(c){c.getContext('2d').clearRect(0,0,c.width,c.height)}
 function mmToPx(mm){return mm*96/25.4*DPR}
-function drawGrid(){
-  clear(cvGrid); if(!gridOn) return;
-  const step=mmToPx(gridStepMM), s=ctxGrid, ox=0.5*DPR, oy=0.5*DPR;
+function drawGrid(){ clear(cvGrid); if(!gridOn) return; const step=mmToPx(gridStepMM), s=ctxGrid, ox=0.5*DPR, oy=0.5*DPR;
   s.save(); s.lineWidth=1; s.strokeStyle=gridColor+'CC'; s.beginPath();
   for(let x=ox;x<=cvGrid.width;x+=step){ s.moveTo(x,0); s.lineTo(x,cvGrid.height); }
   for(let y=oy;y<=cvGrid.height;y+=step){ s.moveTo(0,y); s.lineTo(cvGrid.width,y); }
   s.stroke(); s.restore();
 }
 
-/* ==== drawing core ==== */
+/* ==== coords ==== */
+function pt(e){ const r=cv.getBoundingClientRect(); const x=(e.clientX-r.left)*(cv.width/r.width); const y=(e.clientY-r.top)*(cv.height/r.height); return {x,y}; }
+function snapToGrid(p){ if(!gridOn) return p; const g=mmToPx(gridStepMM); return {x:Math.round(p.x/g)*g,y:Math.round(p.y/g)*g}; }
+function snapLine(p0,p1){ if(gridFirst){ const a0=snapToGrid(p0),a1=snapToGrid(p1); return {x:a1.x,y:a1.y,ang:Math.atan2(a1.y-a0.y,a1.x-a0.x)} } const dx=p1.x-p0.x,dy=p1.y-p0.y,step=Math.PI/12; let ang=Math.round(Math.atan2(dy,dx)/step)*step; let len=Math.hypot(dx,dy),x=p0.x+Math.cos(ang)*len,y=p0.y+Math.sin(ang)*len; if(gridOn){ ({x,y}=snapToGrid({x,y})) } return {x,y,ang}; }
+
+/* ==== palm reject（緩和版） ==== */
+function isPalmTouch(e){
+  if(!palmReject) return false;
+  if(e.pointerType !== 'touch') return false;
+  const area = (e.width||0)*(e.height||0);
+  // セカンダリタッチ or 極端に大きい接触面のみ除外
+  return (e.isPrimary === false) || (area > 20000);
+}
+
+/* ==== drawing ==== */
+let drawing=false, startPt=null, panning=false;
 function setCtx(){
   ctx.lineJoin='round';
   ctx.lineCap=(tool==='marker'||tool==='pen')?cap:'round';
@@ -285,62 +303,38 @@ function setCtx(){
 }
 function hexA(hex,a){const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)||['','cc','e5','8a'];const r=parseInt(m[1],16),g=parseInt(m[2],16),b=parseInt(m[3],16);return `rgba(${r},${g},${b},${a??1})`;}
 
-/* ★ 座標取得を“実寸変換”に統一（ズレ防止） */
-function pt(e){
-  const r=cv.getBoundingClientRect();
-  const x=(e.clientX - r.left) * (cv.width  / r.width);
-  const y=(e.clientY - r.top ) * (cv.height / r.height);
-  return {x,y};
-}
-
-function snapToGrid(p){if(!gridOn)return p;const g=mmToPx(gridStepMM);return {x:Math.round(p.x/g)*g,y:Math.round(p.y/g)*g}}
-function snapLine(p0,p1){if(gridFirst){const a0=snapToGrid(p0),a1=snapToGrid(p1);return {x:a1.x,y:a1.y,ang:Math.atan2(a1.y-a0.y,a1.x-a0.x)}} const dx=p1.x-p0.x,dy=p1.y-p0.y,step=Math.PI/12;let ang=Math.round(Math.atan2(dy,dx)/step)*step;let len=Math.hypot(dx,dy),x=p0.x+Math.cos(ang)*len,y=p0.y+Math.sin(ang)*len;if(gridOn){({x,y}=snapToGrid({x,y}))}return {x,y,ang}}
-
-/* === drawing handlers（B-REL5：連続ストローク方式） === */
-let drawing=false, startPt=null, panning=false;
-
+/* handlers */
 function onDown(e){
   if(DBG) logln(`evt: pd type=${e.pointerType} pres=${e.pressure??'?'} w=${e.width||0} h=${e.height||0}`);
-  if(palmReject){
-    const area=(e.width||0)*(e.height||0);
-    if(e.pointerType==='touch' && area>1200) return; // 簡易パーム
-  }
-  if(tool==='hand'){
-    panning=true; try{cv.setPointerCapture(e.pointerId)}catch{};
-    cv.style.cursor='grabbing';
-    return;
-  }
+  if(tool==='hand'){ panning=true; try{cv.setPointerCapture(e.pointerId)}catch{}; cv.style.cursor='grabbing'; return; }
+  if(isPalmTouch(e)) return;
   e.preventDefault(); try{cv.setPointerCapture(e.pointerId)}catch{};
   setCtx();
-  ctx.lineWidth = (tool==='pen'||tool==='marker') ? ( (typeof e.pressure==='number'&&pressureOn) ? (size*(0.4+0.9*Math.max(0.05,Math.min(1,e.pressure||0.5))))*DPR : (size*DPR) ) : (size*DPR);
+  // 可変幅（圧力ON時のみ）
+  ctx.lineWidth = (tool==='pen'||tool==='marker')
+    ? ((typeof e.pressure==='number' && pressureOn) ? (size*(0.4+0.9*Math.max(0.05,Math.min(1,e.pressure||0.5))))*DPR : size*DPR)
+    : size*DPR;
 
-  const p=pt(e);
-  const straight=(straightKey || $('#uiStraight').checked);
+  const p=pt(e), straight=(straightKey || $('#uiStraight').checked);
   startPt=(gridFirst && straight)?snapToGrid(p):p;
   drawing=true;
-
-  if(!straight){
-    ctx.beginPath();
-    ctx.moveTo(startPt.x,startPt.y);
-  }
+  pushHistory(); // ここで履歴スナップ
+  if(!straight){ ctx.beginPath(); ctx.moveTo(startPt.x,startPt.y); }
 }
 function onMove(e){
   if(tool==='hand' && panning){
-    const r=viewport.getBoundingClientRect();
     if(typeof e.movementX==='number'){ panX+=e.movementX; panY+=e.movementY; }
     else { if(!onMove._last) onMove._last={x:e.clientX,y:e.clientY}; panX+=e.clientX-onMove._last.x; panY+=e.clientY-onMove._last.y; onMove._last={x:e.clientX,y:e.clientY}; }
     updateViewportTransform(); return;
   }
   if(!drawing) return;
-
   const straight=(straightKey || $('#uiStraight').checked);
   if(!straight){
     const list=(e.getCoalescedEvents && e.getCoalescedEvents()) || [e];
     for(const ev of list){ const p=pt(ev); ctx.lineTo(p.x,p.y); }
-    ctx.stroke(); // 連続パスをそのまま描く（途切れなし）
+    ctx.stroke();
     return;
   }
-  // 直線プレビュー
   const p=pt(e), sp=snapLine(startPt,p);
   clear(cvGuide); const g=ctxGuide, d=DPR;
   g.save(); g.lineCap=ctx.lineCap; g.lineWidth=ctx.lineWidth; g.strokeStyle='#7ec8ff';
@@ -349,11 +343,9 @@ function onMove(e){
 function onUp(e){
   if(tool==='hand' && panning){ panning=false; onMove._last=null; cv.style.cursor='grab'; return; }
   if(!drawing){ clear(cvGuide); return; }
-
   const straight=(straightKey || $('#uiStraight').checked);
   if(straight){ const p=pt(e), sp=snapLine(startPt,p); setCtx(); ctx.beginPath(); ctx.moveTo(startPt.x,startPt.y); ctx.lineTo(sp.x,sp.y); ctx.stroke(); }
   drawing=false; startPt=null; clear(cvGuide);
-
   if(DBG) logln(`evt: pu type=${e.pointerType} pres=${e.pressure??'?'} w=${e.width||0} h=${e.height||0}`);
 }
 cv.addEventListener('pointerdown',onDown,{passive:false});
@@ -365,12 +357,12 @@ addEventListener('keydown',e=>{ if(e.key==='Shift') straightKey=true; });
 addEventListener('keyup',e=>{ if(e.key==='Shift') straightKey=false; });
 
 /* text */
-function addText(){const el=document.createElement('div');el.className='note-text';el.contentEditable='true';el.style.left=(90+Math.random()*40)+'px';el.style.top=(70+Math.random()*40)+'px';el.textContent='テキスト';const del=document.createElement('button');del.className='del';del.textContent='削除';del.addEventListener('click',()=>el.remove());el.appendChild(del);textLayer.appendChild(el);setTimeout(()=>el.focus(),0);}
+function addText(){const el=document.createElement('div');el.className='note-text';el.contentEditable='true';el.style.left=(90+Math.random()*40)+'px';el.style.top=(70+Math.random()*40)+'px';el.textContent='テキスト';const del=document.createElement('button');del.className='del';del.textContent='削除';del.addEventListener('click',()=>{pushHistory();el.remove();});el.appendChild(del);textLayer.appendChild(el);pushHistory();setTimeout(()=>el.focus(),0);}
 $('#btnTextAdd').addEventListener('click',addText);
 $('#btnTextBold').addEventListener('click',()=>document.execCommand('bold',false,null));
 $('#btnTextIt').addEventListener('click',()=>document.execCommand('italic',false,null));
 $('#btnTextDel').addEventListener('click',()=>document.execCommand('delete',false,null));
-$('#btnTextBoxDel').addEventListener('click',()=>{const sel=window.getSelection();if(!sel.rangeCount)return;let el=sel.anchorNode;while(el&&!(el instanceof HTMLElement&&el.classList.contains('note-text')))el=el.parentNode;if(el)el.remove();});
+$('#btnTextBoxDel').addEventListener('click',()=>{const sel=window.getSelection(); if(!sel.rangeCount)return; let el=sel.anchorNode; while(el && !(el instanceof HTMLElement && el.classList.contains('note-text'))) el=el.parentNode; if(el){pushHistory(); el.remove();}});
 
 /* output */
 function composite(){const out=document.createElement('canvas');out.width=cv.width;out.height=cv.height;const o=out.getContext('2d');o.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()||'#0b1020';o.fillRect(0,0,out.width,out.height);o.drawImage(cvGrid,0,0);o.drawImage(cv,0,0);[...textLayer.querySelectorAll('.note-text')].forEach(n=>{const r=n.getBoundingClientRect(),L=textLayer.getBoundingClientRect();const x=( (r.left-L.left) * (cv.width / (L.width||1)) ), y=( (r.top-L.top) * (cv.height / (L.height||1)) );o.fillStyle='#eaf3ff';o.font=(16*DPR)+'px system-ui';o.fillText(n.textContent.trim(),x,y+16*DPR)});return out;}
