@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Note Link — v0.8.0-compat-02b-rel-b3</title>
+<title>Note Link — v0.8.0-compat-02b-rel-b4</title>
 <style>
 :root{--ink:#e6f1ff;--ink-dim:#9bd6e9;--bg:#0b1020;--panel:#101827;--accent:#3f78ff;--ok:#20e3c2;--muted:#2a3550;--shadow:0 10px 24px rgba(0,0,0,.45);--topbar-h:44px;--toolbar-w:56px}
 *{box-sizing:border-box}
@@ -26,7 +26,7 @@ header.topbar{position:fixed;top:0;left:0;right:0;z-index:2000;height:var(--topb
 
 .panel{position:absolute;z-index:1400;left:70px;top:calc(var(--topbar-h) + 10px);min-width:280px;max-width:320px;padding:8px 12px 10px;border-radius:14px;color:var(--ink);background:var(--panel);border:1px solid #ffffff24;box-shadow:var(--shadow);display:none;user-select:none;max-height:calc(100vh - var(--topbar-h) - 24px);overflow:auto}
 .panel.show{display:block}
-.panel .handle{position:sticky;top:0;display:flex;align-items:center;gap:8px;padding:8px 12px;margin:-8px -12px 8px;background:var(--panel);border-bottom:1px solid #ffffff20;border-radius:14px 14px 0 0;cursor:grab;touch-action:none} /* ← 追加：ドラッグの割込み防止 */
+.panel .handle{position:sticky;top:0;display:flex;align-items:center;gap:8px;padding:8px 12px;margin:-8px -12px 8px;background:var(--panel);border-bottom:1px solid #ffffff20;border-radius:14px 14px 0 0;cursor:grab;touch-action:none}
 #panelTool{flex:1;font-weight:600;font-size:14px;text-align:left}
 .panel .close{margin-left:auto;height:26px;padding:0 10px;border-radius:8px;border:1px solid #ffffff2e;background:#ffffff14;color:var(--ink);font-size:14px}
 .panel .row{display:flex;align-items:center;gap:10px;margin:6px 0}
@@ -64,7 +64,7 @@ header.topbar{position:fixed;top:0;left:0;right:0;z-index:2000;height:var(--topb
 </head>
 <body>
 <header class="topbar" id="topbar">
-  <strong id="verText">Note Link v0.8.0 / B-REL3</strong>
+  <strong id="verText">Note Link v0.8.0 / B-REL4</strong>
   <span class="sp"></span>
   <button class="btn" id="btnZoomOut">−</button>
   <button class="btn" id="btnZoomReset">100%</button>
@@ -74,7 +74,7 @@ header.topbar{position:fixed;top:0;left:0;right:0;z-index:2000;height:var(--topb
   <button class="btn" id="btnPrint">印刷</button>
   <button class="btn" id="btnPng">PNG</button>
   <button class="btn" id="btnShare">共有</button>
-  <span class="build" id="buildText">build: compat-02b-rel-b3</span>
+  <span class="build" id="buildText">build: compat-02b-rel-b4</span>
 </header>
 
 <aside class="sidebar" id="sidebar">
@@ -174,10 +174,10 @@ const cv=$('#paint'), ctx=cv.getContext('2d',{alpha:true});
 const viewport=$('#viewport'), textLayer=$('#textLayer');
 
 /* ==== version ==== */
-const APP_VERSION='v0.8.0', BUILD_ID='compat-02b-rel-b3';
+const APP_VERSION='v0.8.0', BUILD_ID='compat-02b-rel-b4';
 document.title=`Note Link — ${APP_VERSION}-${BUILD_ID}`;
 $('#buildText').textContent=`build: ${BUILD_ID}`;
-$('#verText').textContent='Note Link v0.8.0 / B-REL3';
+$('#verText').textContent='Note Link v0.8.0 / B-REL4';
 
 /* ==== layout ==== */
 function applyBars(){ const h=Math.round(topbar.getBoundingClientRect().height)||44; document.documentElement.style.setProperty('--topbar-h',h+'px');}
@@ -212,6 +212,8 @@ function setActiveTool(t){
   $('#rowSize').style.display=(t==='pen'||t==='marker'||t==='eraser')?'':'none';
   $('#rowPenExt').style.display=(t==='pen'||t==='marker')?'':'none';
   syncUI();
+  /* Handカーソル（見た目のみ） */
+  cv.style.cursor = (t === 'hand') ? 'grab' : 'crosshair';
 }
 $('#btnSidebarToggle').addEventListener('click',e=>{ e.stopPropagation(); sidebar.classList.toggle('collapsed');});
 $$('.tool').forEach(btn=>{
@@ -251,7 +253,13 @@ function onPanelChange(){color=ui.color.value;size=+ui.size.value;ui.sizeVal.tex
 Object.values(ui).forEach(el=>el.addEventListener('input',onPanelChange));
 
 /* ==== zoom ==== */
-function setZoom(z){zoom=Math.max(0.5,Math.min(3,z));$('#btnZoomReset').textContent=Math.round(zoom*100)+'%';updateViewportTransform();resize();}
+function setZoom(z){
+  zoom = Math.max(0.5, Math.min(3, z));
+  $('#btnZoomReset').textContent = Math.round(zoom*100) + '%';
+  updateViewportTransform();
+  /* キャンバス再構築は行わない：既存描画を維持。必要な表示はグリッドのみ更新 */
+  drawGrid();
+}
 $('#btnZoomIn').addEventListener('click',()=>setZoom(zoom+0.1));
 $('#btnZoomOut').addEventListener('click',()=>setZoom(zoom-0.1));
 $('#btnZoomReset').addEventListener('click',()=>setZoom(1));
@@ -264,14 +272,14 @@ function drawGrid(){
   const step=mmToPx(gridStepMM), s=ctxGrid, ox=0.5*DPR, oy=0.5*DPR;
   s.save(); s.lineWidth=1; s.strokeStyle=gridColor+'CC'; s.beginPath();
   for(let x=ox;x<=cvGrid.width;x+=step){ s.moveTo(x,0); s.lineTo(x,cvGrid.height); }
-  for(let y=oy;y<=cvGrid.height;y+=step){ s.moveTo(0,y); s.lineTo(cvGrid.width,y); } /* ← 修正 */
+  for(let y=oy;y<=cvGrid.height;y+=step){ s.moveTo(0,y); s.lineTo(cvGrid.width,y); }
   s.stroke(); s.restore();
 }
 
 /* ==== drawing core ==== */
 function setCtx(){
   ctx.lineCap=(tool==='marker'||tool==='pen')?cap:'round';
-  ctx.lineJoin='round'; /* ← 追加：微小ギャップの目立ち防止 */
+  ctx.lineJoin='round';
   if(tool==='marker'){ ctx.globalCompositeOperation='source-over'; ctx.strokeStyle=hexA(color,alpha); }
   else if(tool==='pen'){ ctx.globalCompositeOperation='source-over'; ctx.strokeStyle=color; }
   else if(tool==='eraser'){ ctx.globalCompositeOperation='destination-out'; ctx.strokeStyle='#000'; }
@@ -301,39 +309,57 @@ function isPalmTouch(e){
 function dynamicWidthFromPen(e,base){let w=base;if(pressureOn&&typeof e.pressure==='number'){const p=Math.max(0.05,Math.min(1,e.pressure||0.5));w=base*(0.4+0.9*p)}if(tiltOn){const t=Math.hypot(e.tiltX||0,e.tiltY||0)/90;const k=(tool==='marker'?0.9:0.4);w*=(1+k*Math.min(1,t))}return w}
 function updatePenRecent(e){if(e.pointerType==='pen'||isStylusLike(e)){penRecent.active=true;penRecent.ts=performance.now()}}
 
-/* drawing handlers (coalesced events 対応) */
-let drawing=false,startPt=null,panning=false;
-function drawFreehandFrom(e){
-  const list = (e.getCoalescedEvents && e.getCoalescedEvents()) || [e];
-  for(const ev of list){
-    const p=pt(ev);
-    ctx.lineTo(p.x,p.y);
-  }
+/* === drawing handlers（B-REL4：濃さ差解消＆滑らか化） === */
+let drawing=false, startPt=null, lastPt=null, panning=false;
+
+function drawSegment(prev, cur){
+  ctx.beginPath();
+  const mx=(prev.x+cur.x)/2, my=(prev.y+cur.y)/2;
+  ctx.moveTo(prev.x, prev.y);
+  ctx.quadraticCurveTo(prev.x, prev.y, mx, my);
   ctx.stroke();
 }
+function drawFreehandFrom(e){
+  const list=(e.getCoalescedEvents && e.getCoalescedEvents()) || [e];
+  for(const ev of list){
+    const p=pt(ev);
+    if(!lastPt){ lastPt=p; continue; }
+    drawSegment(lastPt, p);
+    lastPt=p;
+  }
+}
+
 function onDown(e){
   updatePenRecent(e);
   if(isPalmTouch(e)) return;
-  if(tool==='hand'){panning=true; try{cv.setPointerCapture(e.pointerId)}catch{}; return;}
+  if(tool==='hand'){
+    panning=true; try{cv.setPointerCapture(e.pointerId)}catch{};
+    cv.style.cursor='grabbing';
+    return;
+  }
   e.preventDefault(); try{cv.setPointerCapture(e.pointerId)}catch{};
   setCtx(); ctx.lineWidth=dynamicWidthFromPen(e,(size||4))*DPR;
-  const p=pt(e); const straight=(straightKey||$('#uiStraight').checked);
-  startPt=(gridFirst&&straight)?snapToGrid(p):p; drawing=true;
-  if(!straight){ctx.beginPath(); ctx.moveTo(startPt.x,startPt.y);}
+  const p=pt(e);
+  const straight=(straightKey || $('#uiStraight').checked);
+  startPt=(gridFirst && straight)?snapToGrid(p):p;
+  drawing=true; lastPt=startPt;
   if(DBG) logln(`evt: pd type=${e.pointerType} pres=${e.pressure??'?'} w=${e.width||0} h=${e.height||0}`);
 }
 function onMove(e){
   updatePenRecent(e);
   if(isPalmTouch(e)) return;
-  if(tool==='hand'&&panning){
-    if(typeof e.movementX==='number'){panX+=e.movementX; panY+=e.movementY;}
+
+  if(tool==='hand' && panning){
+    if(typeof e.movementX==='number'){ panX+=e.movementX; panY+=e.movementY; }
     else { if(!onMove._last) onMove._last={x:e.clientX,y:e.clientY}; panX+=e.clientX-onMove._last.x; panY+=e.clientY-onMove._last.y; onMove._last={x:e.clientX,y:e.clientY}; }
     updateViewportTransform(); return;
   }
   if(!drawing) return;
+
   ctx.lineWidth=dynamicWidthFromPen(e,(size||4))*DPR;
-  const straight=(straightKey||$('#uiStraight').checked);
+  const straight=(straightKey || $('#uiStraight').checked);
   if(!straight){ drawFreehandFrom(e); return; }
+
   const p=pt(e); const sp=snapLine(startPt,p);
   clear(cvGuide); const g=ctxGuide,d=DPR;
   g.save(); g.lineCap=ctx.lineCap; g.lineWidth=ctx.lineWidth; g.strokeStyle='#7ec8ff'; g.setLineDash([6*d,6*d]);
@@ -341,20 +367,21 @@ function onMove(e){
 }
 function onUp(e){
   updatePenRecent(e);
-  if(tool==='hand'&&panning){ panning=false; onMove._last=null; return; }
+  if(tool==='hand' && panning){ panning=false; onMove._last=null; cv.style.cursor='grab'; return; }
   if(!drawing){ clear(cvGuide); return; }
-  const straight=(straightKey||$('#uiStraight').checked);
-  if(straight){ const p=pt(e); const sp=snapLine(startPt,p); setCtx(); ctx.lineWidth=dynamicWidthFromPen(e,(size||4))*DPR; ctx.beginPath(); ctx.moveTo(startPt.x,startPt.y); ctx.lineTo(sp.x,sp.y); ctx.stroke(); }
-  drawing=false; startPt=null; clear(cvGuide);
+
+  const straight=(straightKey || $('#uiStraight').checked);
+  if(straight){ const p=pt(e), sp=snapLine(startPt,p); setCtx(); ctx.lineWidth=dynamicWidthFromPen(e,(size||4))*DPR; ctx.beginPath(); ctx.moveTo(startPt.x,startPt.y); ctx.lineTo(sp.x,sp.y); ctx.stroke(); }
+  drawing=false; startPt=null; lastPt=null; clear(cvGuide);
   if(DBG) logln(`evt: pu type=${e.pointerType} pres=${e.pressure??'?'} w=${e.width||0} h=${e.height||0}`);
 }
 cv.addEventListener('pointerdown',onDown,{passive:false});
 cv.addEventListener('pointermove',onMove,{passive:false});
-cv.addEventListener('pointerrawupdate',onMove,{passive:false}); /* 追従強化 */
+cv.addEventListener('pointerrawupdate',onMove,{passive:false});
 cv.addEventListener('pointerup',onUp,{passive:false});
 cv.addEventListener('pointercancel',onUp,{passive:false});
-addEventListener('keydown',e=>{ if(e.key==='Shift') straightKey=true;});
-addEventListener('keyup',e=>{ if(e.key==='Shift') straightKey=false;});
+addEventListener('keydown',e=>{ if(e.key==='Shift') straightKey=true; });
+addEventListener('keyup',e=>{ if(e.key==='Shift') straightKey=false; });
 
 /* text */
 function addText(){const el=document.createElement('div');el.className='note-text';el.contentEditable='true';el.style.left=(90+Math.random()*40)+'px';el.style.top=(70+Math.random()*40)+'px';el.textContent='テキスト';const del=document.createElement('button');del.className='del';del.textContent='削除';del.addEventListener('click',()=>el.remove());el.appendChild(del);textLayer.appendChild(el);setTimeout(()=>el.focus(),0);}
